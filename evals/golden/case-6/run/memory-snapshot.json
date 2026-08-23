@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "brand": "理想汽车",
+  "teacher": "张老师",
+  "items": [
+    {
+      "id": "M-2026-08-01-01",
+      "scope": "personal",
+      "teacher": "张老师",
+      "knowledge": "媒体供稿把参数转成场景",
+      "trigger": {"brand": "理想汽车", "category": "媒体观点供稿"},
+      "not_applicable": ["新闻稿"],
+      "evidence": [],
+      "evidence_count": 2,
+      "distinct_events": 2,
+      "counterexamples": [],
+      "confidence": 0.65,
+      "status": "active",
+      "created": "2026-08-01",
+      "updated": "2026-08-01"
+    },
+    {
+      "id": "M-2026-08-05-01",
+      "scope": "personal",
+      "teacher": "李老师",
+      "knowledge": "新闻稿开头直接给数据",
+      "trigger": {"brand": "理想汽车", "category": "新闻稿"},
+      "not_applicable": ["演讲稿"],
+      "evidence": [],
+      "evidence_count": 1,
+      "distinct_events": 1,
+      "counterexamples": [],
+      "confidence": 0.5,
+      "status": "active",
+      "created": "2026-08-05",
+      "updated": "2026-08-05"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "run_id": "20260820-113000-lixiang",
+  "brand": "理想汽车",
+  "mode": "生成",
+  "verdict": "violated",
+  "checks": [
+    {
+      "id": "A1",
+      "name": "入口唯一",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A2",
+      "name": "单品牌隔离",
+      "status": "fail",
+      "detail": "读取了既不在绑定知识库、也不在本次登记附件内的路径：/kb/东风奕派/05-成品参考/新闻稿/eπ008发布.md（老师给的文件要先 open --attach 登记）；正文混入其他品牌信息：东风奕派 eπ008（相比东风奕派 eπ008 的空间表现）",
+      "evidence": [
+        "evidence.json:read_paths",
+        "verify.json:cross_brand"
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "动态访谈",
+      "status": "pass",
+      "detail": "访谈停止，覆盖维度：事实安全、传播主线｜理由：剩余未知不影响主线与事实",
+      "evidence": []
+    },
+    {
+      "id": "A4",
+      "name": "责任隔离",
+      "status": "fail",
+      "detail": "写作者读了写作程序未授权的文件：02-原文资产/品牌基础/理想战略指引-2026年3月版本.md（写作阶段重新选素材会让取舍问题与表达问题无法区分）",
+      "evidence": [
+        "write-receipt.json:read_paths"
+      ]
+    },
+    {
+      "id": "A5",
+      "name": "输出有效",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A6",
+      "name": "学习不僵化",
+      "status": "skip",
+      "detail": "本次运行没有老师反馈，学习外循环未启动",
+      "evidence": []
+    }
+  ],
+  "failed": [
+    "A2",
+    "A4"
+  ],
+  "missing_artifacts": []
+}

@@ -1,0 +1,16 @@
+{
+  "role": "editorial-adversary",
+  "run_id": "20260823-120000-lixiang",
+  "task_id": "T5",
+  "status": "sound",
+  "read_paths": [],
+  "attacks": [
+    {
+      "target": "信息权重",
+      "claim": "行业语境偏薄",
+      "why": "只有一句行业下滑",
+      "severity": "minor"
+    }
+  ],
+  "missed_stronger_line": null
+}

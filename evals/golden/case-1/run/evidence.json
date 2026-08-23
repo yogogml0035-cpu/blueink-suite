@@ -1,0 +1,70 @@
+{
+  "role": "evidence-researcher",
+  "run_id": "20260820-100000-lixiang",
+  "task_id": "T1",
+  "status": "ok",
+  "brand": "理想汽车",
+  "read_paths": [
+    "02-原文资产/财报业绩会速记/2026Q1速记.md",
+    "05-成品参考/新闻稿/经营类/2026年3月交付.md",
+    "04-经验总结原稿/财报稿方法论.md"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "statement": "2026 年 3 月交付 41,053 辆",
+      "source": "05-成品参考/新闻稿/经营类/2026年3月交付.md",
+      "source_date": "2026-03-01",
+      "track": "fact",
+      "confidence": "high"
+    },
+    {
+      "id": "F2",
+      "statement": "增程平台已进入规模化量产阶段",
+      "source": "02-原文资产/财报业绩会速记/2026Q1速记.md",
+      "source_date": "2026-05-28",
+      "track": "fact",
+      "confidence": "high"
+    }
+  ],
+  "timeline": [
+    {
+      "date": "2026-03-01",
+      "event": "3 月交付数据公布",
+      "source": "05-成品参考/新闻稿/经营类/2026年3月交付.md"
+    }
+  ],
+  "style_refs": [
+    {
+      "path": "05-成品参考/新闻稿/经营类/2026年3月交付.md",
+      "why": "同品牌同场景终稿",
+      "category": "新闻稿"
+    }
+  ],
+  "strategy_signals": [
+    {
+      "pattern": "终稿会删掉与主线无关的技术罗列",
+      "evidence": [
+        "04-经验总结原稿/财报稿方法论.md"
+      ],
+      "counterexample": null
+    }
+  ],
+  "conflicts": [],
+  "gaps": [
+    {
+      "missing": "良品率具体数值",
+      "impact": "只影响细节",
+      "how_to_fill": "问老师"
+    }
+  ],
+  "observations": [
+    "速记里关于产线的段落比交付数据更完整"
+  ],
+  "discarded": [
+    {
+      "path": "02-原文资产/品牌基础/理想战略指引-2026年3月版本.md",
+      "why": "属于战略层，与本次主线无关"
+    }
+  ]
+}

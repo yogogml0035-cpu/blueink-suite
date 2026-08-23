@@ -1,0 +1,54 @@
+{
+  "run_id": "20260823-130000-lixiang",
+  "brand": "理想汽车",
+  "mode": "生成",
+  "verdict": "incomplete",
+  "checks": [
+    {
+      "id": "A1",
+      "name": "入口唯一",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A2",
+      "name": "单品牌隔离",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A3",
+      "name": "动态访谈",
+      "status": "pass",
+      "detail": "本次零轮访谈，覆盖维度：事实安全、传播主线、信息权重、交付可行性｜理由：两个高影响项都已由附件闭合，不构成合法提问：（1）主线——《指引》「理想核心信息」段已显式指定本次核",
+      "evidence": []
+    },
+    {
+      "id": "A4",
+      "name": "责任隔离",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A5",
+      "name": "输出有效",
+      "status": "skip",
+      "detail": "运行还没归档，尚未走到交付（缺 delivery.md）",
+      "evidence": []
+    },
+    {
+      "id": "A6",
+      "name": "学习不僵化",
+      "status": "skip",
+      "detail": "本次运行没有老师反馈，学习外循环未启动",
+      "evidence": []
+    }
+  ],
+  "failed": [],
+  "missing_artifacts": [
+    "delivery.md"
+  ]
+}

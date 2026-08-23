@@ -1,0 +1,16 @@
+{
+  "role": "evidence-researcher",
+  "run_id": "20260822-090000-lixiang",
+  "task_id": "T1",
+  "status": "ok",
+  "brand": "理想汽车",
+  "read_paths": ["05-成品参考/新闻稿/经营类/2026年3月交付.md"],
+  "facts": [{"id": "F1", "statement": "理想汽车 3 月交付 27,668 辆", "source": "05-成品参考/新闻稿/经营类/2026年3月交付.md", "source_date": "2026-04-01", "track": "fact", "confidence": "high"}],
+  "timeline": [],
+  "style_refs": [],
+  "strategy_signals": [],
+  "conflicts": [],
+  "gaps": [],
+  "observations": [],
+  "discarded": []
+}

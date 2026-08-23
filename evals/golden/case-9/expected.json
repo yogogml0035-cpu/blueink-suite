@@ -1,0 +1,52 @@
+{
+  "run_id": "20260823-100000-lixiang",
+  "brand": "理想汽车",
+  "mode": "生成",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "A1",
+      "name": "入口唯一",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A2",
+      "name": "单品牌隔离",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A3",
+      "name": "动态访谈",
+      "status": "pass",
+      "detail": "本次零轮访谈，覆盖维度：传播主线、交付可行性｜理由：本轮无合法问题可问：交付合同由老师直接给定，证据边界由「以附件为准」封闭，品类可由附件内部证据判定；",
+      "evidence": []
+    },
+    {
+      "id": "A4",
+      "name": "责任隔离",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A5",
+      "name": "输出有效",
+      "status": "pass",
+      "detail": "通过",
+      "evidence": []
+    },
+    {
+      "id": "A6",
+      "name": "学习不僵化",
+      "status": "skip",
+      "detail": "本次运行没有老师反馈，学习外循环未启动",
+      "evidence": []
+    }
+  ],
+  "failed": [],
+  "missing_artifacts": []
+}

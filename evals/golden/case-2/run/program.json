@@ -1,0 +1,41 @@
+{
+  "run_id": "20260820-113000-lixiang",
+  "brand": "理想汽车",
+  "category": "新闻稿",
+  "communication": {
+    "publisher": "品牌官方",
+    "audience": "大众媒体",
+    "intent": "传达产品价值"
+  },
+  "delivery_contract": {
+    "channel": "新闻稿",
+    "length": "900 字",
+    "format": "Markdown"
+  },
+  "fact_bounds": {
+    "allowed_fact_ids": [
+      "F1"
+    ],
+    "forbidden": []
+  },
+  "line": "L9 把家庭出行的舒适门槛又抬了一级",
+  "material_plan": {
+    "foreground": [
+      "F1"
+    ],
+    "discarded": []
+  },
+  "information_budget": "体验 60%、配置 25%、价格 15%",
+  "expression_bounds": [
+    "不得拉踩竞品"
+  ],
+  "memories_applied": [],
+  "authorized_reads": [
+    "05-成品参考/新闻稿/产品类/L9发布.md"
+  ],
+  "style_refs": [
+    "05-成品参考/新闻稿/产品类/L9发布.md"
+  ],
+  "assumptions": [],
+  "ab": false
+}

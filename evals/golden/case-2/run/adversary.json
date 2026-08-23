@@ -1,0 +1,28 @@
+{
+  "role": "editorial-adversary",
+  "run_id": "20260820-113000-lixiang",
+  "task_id": "T5",
+  "status": "weak",
+  "surfaces_checked": [
+    "传播目标",
+    "主线",
+    "结构",
+    "信息权重",
+    "品牌感",
+    "特殊条件"
+  ],
+  "attacks": [
+    {
+      "surface": "品牌感",
+      "quote": "相比东风奕派 eπ008 的空间表现",
+      "para": 5,
+      "problem": "引入了另一家客户的产品，且构成拉踩",
+      "severity": "明显",
+      "cost_if_ignored": "客户红线风险"
+    }
+  ],
+  "template_smells": [],
+  "missed_stronger_line": null,
+  "special_condition": null,
+  "ab_comparison": null
+}

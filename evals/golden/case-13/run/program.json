@@ -1,0 +1,40 @@
+{
+  "run_id": "20260823-090000-lixiang",
+  "brand": "理想汽车",
+  "category": "演讲稿",
+  "communication": {
+    "publisher": "CTO 本人（工程师身份）",
+    "audience": "技术论坛的工程背景听众",
+    "intent": "让对方相信这套冷却方案是被真实失败逼出来的"
+  },
+  "delivery_contract": {
+    "channel": "技术论坛口播",
+    "length": "8 分钟，约 1100 字",
+    "format": "Markdown"
+  },
+  "fact_bounds": {
+    "allowed_fact_ids": ["F1", "F2"],
+    "forbidden": ["耐久验证的具体小时数"]
+  },
+  "line": "第 47 轮台架失效逼出了现在这套冷却回路",
+  "material_plan": {
+    "foreground": ["F1", "F2"],
+    "discarded": ["F0"]
+  },
+  "information_budget": "失效过程 50%、重新设计 35%、收束 15%",
+  "expression_bounds": [
+    "第一人称，工程师身份，不代表公司表态",
+    "语义温度克制，不使用发布会式昂扬句式",
+    "不做产品宣传，不提交付数据"
+  ],
+  "authorized_reads": [
+    "05-成品参考/演讲稿/2025技术论坛致辞.md"
+  ],
+  "style_refs": [
+    "05-成品参考/演讲稿/2025技术论坛致辞.md"
+  ],
+  "assumptions": [
+    "听众是工程背景，不解释增程基本原理"
+  ],
+  "memories_used": []
+}

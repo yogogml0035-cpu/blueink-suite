@@ -1,0 +1,26 @@
+{
+  "role": "editorial-strategist",
+  "run_id": "20260823-093000-lixiang",
+  "task_id": "T2",
+  "status": "ok",
+  "read_paths": [],
+  "communication_tasks": [
+    "让媒体理解主动停产是有能力支撑的战略选择"
+  ],
+  "recommended_line": {
+    "claim": "主动停产不是被动收缩，而是有纯电能力支撑的战略选择",
+    "why": "附件同时给出交付增长与停产事实，二者的张力就是本稿论点"
+  },
+  "alternative_line": null,
+  "material_plan": {
+    "foreground": [
+      "F2",
+      "F1"
+    ],
+    "discarded": [
+      "财务现金流细节"
+    ]
+  },
+  "information_budget": "战略取舍 55%、交付结果 30%、行业语境 15%",
+  "applicable_conventions": []
+}

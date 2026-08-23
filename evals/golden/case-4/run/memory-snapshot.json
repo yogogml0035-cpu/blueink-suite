@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "brand": "理想汽车",
+  "items": [
+    {
+      "id": "M-2026-08-01-01",
+      "scope": "personal",
+      "knowledge": "媒体供稿把参数转成场景",
+      "trigger": {
+        "brand": "理想汽车",
+        "category": "媒体观点供稿"
+      },
+      "not_applicable": [
+        "新闻稿"
+      ],
+      "evidence": [],
+      "evidence_count": 2,
+      "distinct_events": 2,
+      "counterexamples": [],
+      "confidence": 0.65,
+      "status": "active",
+      "created": "2026-08-01",
+      "updated": "2026-08-01"
+    },
+    {
+      "id": "M-2026-08-10-01",
+      "scope": "methodology",
+      "knowledge": "所有品类都不该在开头铺背景",
+      "trigger": {
+        "brand": "理想汽车"
+      },
+      "not_applicable": [],
+      "evidence": [],
+      "evidence_count": 1,
+      "distinct_events": 1,
+      "counterexamples": [],
+      "confidence": 0.5,
+      "status": "active",
+      "created": "2026-08-10",
+      "updated": "2026-08-10"
+    }
+  ]
+}

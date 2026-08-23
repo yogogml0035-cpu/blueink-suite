@@ -1,0 +1,44 @@
+{
+  "role": "evidence-researcher",
+  "run_id": "20260823-090000-lixiang",
+  "task_id": "T1",
+  "status": "ok",
+  "brand": "理想汽车",
+  "read_paths": [
+    "02-原文资产/技术资料/增程台架测试纪要.md",
+    "05-成品参考/演讲稿/2025技术论坛致辞.md"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "statement": "台架测试第 47 轮出现热管理失效，此后重做了冷却回路设计",
+      "source": "02-原文资产/技术资料/增程台架测试纪要.md",
+      "source_date": "2026-04-18",
+      "track": "fact",
+      "confidence": "high"
+    },
+    {
+      "id": "F2",
+      "statement": "重新设计后的冷却回路通过了全部耐久验证",
+      "source": "02-原文资产/技术资料/增程台架测试纪要.md",
+      "source_date": "2026-04-18",
+      "track": "fact",
+      "confidence": "high"
+    }
+  ],
+  "timeline": [
+    {"date": "2026-04-18", "event": "台架测试纪要定稿", "source": "02-原文资产/技术资料/增程台架测试纪要.md"}
+  ],
+  "style_refs": [
+    {
+      "path": "05-成品参考/演讲稿/2025技术论坛致辞.md",
+      "why": "同一场合的历史致辞，可参考篇幅与段落节奏",
+      "caveat": "口吻昂扬，与本次确认的克制语义温度不符，只取结构不取语气"
+    }
+  ],
+  "conflicts": [],
+  "gaps": [
+    "耐久验证的具体小时数未在纪要中出现，本次不写"
+  ],
+  "discarded": ["F0"]
+}

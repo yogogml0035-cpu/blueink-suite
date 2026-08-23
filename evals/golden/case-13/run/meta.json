@@ -1,0 +1,15 @@
+{
+  "run_id": "20260823-090000-lixiang",
+  "started_via": "/blueink-suite",
+  "started_at": "2026-08-23T09:00:00",
+  "mode": "生成",
+  "brand": "理想汽车",
+  "brand_key": "lixiang",
+  "brand_asked": "理想",
+  "kb_root": "/kb/理想汽车",
+  "bound": true,
+  "stage": 9,
+  "stage_name": "运行归档",
+  "closed_at": "2026-08-23T09:38:00",
+  "launch_receipt": "BlueInk 已启动 · run-id: 20260823-090000-lixiang · 品牌: 理想汽车 · 老师: 张老师 · 模式: 生成"
+}

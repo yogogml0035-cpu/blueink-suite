@@ -1,0 +1,28 @@
+{
+  "role": "evidence-researcher",
+  "run_id": "20260820-113000-lixiang",
+  "task_id": "T1",
+  "status": "ok",
+  "brand": "理想汽车",
+  "read_paths": [
+    "05-成品参考/新闻稿/产品类/L9发布.md",
+    "/kb/东风奕派/05-成品参考/新闻稿/eπ008发布.md"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "statement": "L9 全国统一零售价 45.98 万元起",
+      "source": "05-成品参考/新闻稿/产品类/L9发布.md",
+      "source_date": "2026-05-15",
+      "track": "fact",
+      "confidence": "high"
+    }
+  ],
+  "timeline": [],
+  "style_refs": [],
+  "strategy_signals": [],
+  "conflicts": [],
+  "gaps": [],
+  "observations": [],
+  "discarded": []
+}

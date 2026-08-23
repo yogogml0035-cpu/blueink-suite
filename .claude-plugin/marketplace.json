@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "blueink-suite",
+  "description": "新蓝标数字汽车事业群的公关文案生成能力：证据驱动的编辑决策系统，单品牌单老师工作空间，六个责任型子智能体，出问题可定位到具体角色与文件。",
+  "owner": {
+    "name": "新蓝标数字 · 汽车事业群 · AI 内容中台"
+  },
+  "plugins": [
+    {
+      "name": "blueink-suite",
+      "source": "./",
+      "description": "蓝墨 BlueInk——证据驱动的汽车公关文案编辑决策系统。为每次任务动态生成本次写作程序，再交给写作子智能体执行。必须由显式 /blueink-suite 启动。"
+    }
+  ]
+}

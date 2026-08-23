@@ -1,0 +1,44 @@
+{
+  "role": "evidence-researcher",
+  "run_id": "20260823-090000-lixiang",
+  "task_id": "T1",
+  "status": "ok",
+  "brand": "理想汽车",
+  "read_paths": [
+    "/attachments/【指引】理想汽车2026年第一季度财报.md",
+    "/attachments/【新闻稿】理想汽车公布2026年第一季度财报.md"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "statement": "一季度交付 95,142 辆",
+      "source": "/attachments/【新闻稿】理想汽车公布2026年第一季度财报.md",
+      "source_date": "2026-05-20",
+      "track": "fact",
+      "confidence": "high"
+    },
+    {
+      "id": "F2",
+      "statement": "L 系列部分车型主动停产",
+      "source": "/attachments/【指引】理想汽车2026年第一季度财报.md",
+      "source_date": "2026-05-20",
+      "track": "fact",
+      "confidence": "high"
+    }
+  ],
+  "timeline": [
+    {
+      "date": "2026-05-20",
+      "event": "一季度财报发布",
+      "source": "/attachments/【新闻稿】理想汽车公布2026年第一季度财报.md"
+    }
+  ],
+  "style_refs": [],
+  "strategy_signals": [],
+  "conflicts": [],
+  "gaps": [],
+  "observations": [
+    "指引给出五条候选方向，需要编辑取舍"
+  ],
+  "discarded": []
+}

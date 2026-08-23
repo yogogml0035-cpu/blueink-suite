@@ -1,0 +1,23 @@
+{
+  "role": "professional-writer",
+  "run_id": "20260820-113000-lixiang",
+  "task_id": "T3",
+  "variant": "single",
+  "status": "ok",
+  "draft_path": "draft.md",
+  "line_executed": "L9 把家庭出行的舒适门槛又抬了一级",
+  "fact_ids_used": [
+    "F1"
+  ],
+  "budget_actual": "体验 55%、配置 30%、价格 15%",
+  "read_paths": [
+    "05-成品参考/新闻稿/产品类/L9发布.md",
+    "02-原文资产/品牌基础/理想战略指引-2026年3月版本.md"
+  ],
+  "style_refs_used": [
+    "05-成品参考/新闻稿/产品类/L9发布.md"
+  ],
+  "deviations": [],
+  "missing_facts": [],
+  "objections": []
+}

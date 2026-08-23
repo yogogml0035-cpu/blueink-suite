@@ -1,0 +1,75 @@
+{
+  "role": "feedback-attributor",
+  "run_id": "20260821-150000-lixiang",
+  "task_id": "T6",
+  "status": "ok",
+  "brand": "理想汽车",
+  "raw_feedback": "开头别铺行业背景了，直接说事。另外这段参数太干，换成场景。",
+  "candidates": [
+    {
+      "id": "M-2026-08-21-01",
+      "scope": "personal",
+      "evidence_strength": "high",
+      "knowledge": "不要在开头写行业背景",
+      "trigger": {
+        "category": "媒体观点供稿",
+        "brand": "理想汽车"
+      },
+      "not_applicable": [],
+      "before": "在新能源汽车高速发展的大背景下……",
+      "after": "一条产线的良品率……",
+      "stated_reason": "记者不看背景",
+      "conflicts_with": [],
+      "evidence_count": 1,
+      "counterexamples": [],
+      "confidence": 0.5,
+      "needs_confirmation": true
+    },
+    {
+      "id": "M-2026-08-21-02",
+      "scope": "brand",
+      "evidence_strength": "medium",
+      "knowledge": "把技术参数转换为可感知场景",
+      "trigger": {
+        "category": "媒体观点供稿",
+        "brand": "理想汽车",
+        "scene": "体验类"
+      },
+      "not_applicable": [
+        "新闻稿",
+        "核心信息"
+      ],
+      "before": "CLTC 续航 1412 公里",
+      "after": "从北京到济南不用充电",
+      "stated_reason": null,
+      "conflicts_with": [],
+      "evidence_count": 1,
+      "counterexamples": [],
+      "confidence": 0.95,
+      "needs_confirmation": false
+    },
+    {
+      "id": "M-2026-08-21-03",
+      "scope": "session",
+      "evidence_strength": "low",
+      "knowledge": "这一段再文艺一点",
+      "trigger": {
+        "brand": "理想汽车"
+      },
+      "not_applicable": [],
+      "before": "……",
+      "after": "……",
+      "stated_reason": "老师想让语气更柔和",
+      "conflicts_with": [],
+      "evidence_count": 1,
+      "counterexamples": [],
+      "confidence": 0.2,
+      "needs_confirmation": false
+    }
+  ],
+  "ab_choice": {
+    "chosen": null,
+    "variable": null
+  },
+  "unattributable": []
+}

@@ -1,0 +1,15 @@
+{
+  "role": "source-verifier",
+  "run_id": "20260822-090000-lixiang",
+  "task_id": "T4",
+  "variant": "single",
+  "status": "pass",
+  "read_paths": ["05-成品参考/新闻稿/经营类/2026年3月交付.md"],
+  "verdict": "可进入人工初审",
+  "claims": [{"quote": "理想汽车 3 月交付 27,668 辆。", "para": 1, "judgement": "matched", "fact_id": "F1", "source": "05-成品参考/新闻稿/经营类/2026年3月交付.md", "source_date": "2026-04-01", "detail": "", "action": ""}],
+  "cross_brand": [],
+  "discarded_resurfaced": [],
+  "redline_hits": [],
+  "coverage": {"total_claims": 1, "matched": 1, "drifted": 0, "unsourced": 0, "stale": 0},
+  "sources_used": [{"path_or_url": "05-成品参考/新闻稿/经营类/2026年3月交付.md", "kind": "历史稿件", "date": "2026-04-01"}]
+}
