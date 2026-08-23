@@ -8,14 +8,16 @@
   "candidates": [
     {
       "id": "M-2026-08-21-01",
-      "scope": "personal",
+      "scope": "workspace",
       "evidence_strength": "high",
       "knowledge": "不要在开头写行业背景",
       "trigger": {
         "category": "媒体观点供稿",
         "brand": "理想汽车"
       },
-      "not_applicable": [],
+      "not_applicable": [
+        "新闻稿"
+      ],
       "before": "在新能源汽车高速发展的大背景下……",
       "after": "一条产线的良品率……",
       "stated_reason": "记者不看背景",
@@ -45,8 +47,8 @@
       "conflicts_with": [],
       "evidence_count": 1,
       "counterexamples": [],
-      "confidence": 0.95,
-      "needs_confirmation": false
+      "confidence": 0.5,
+      "needs_confirmation": true
     },
     {
       "id": "M-2026-08-21-03",
@@ -59,7 +61,7 @@
       "not_applicable": [],
       "before": "……",
       "after": "……",
-      "stated_reason": "老师想让语气更柔和",
+      "stated_reason": null,
       "conflicts_with": [],
       "evidence_count": 1,
       "counterexamples": [],

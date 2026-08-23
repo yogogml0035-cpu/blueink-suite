@@ -38,13 +38,6 @@
       "status": "pass",
       "detail": "证据里有 2 组冲突，而写作程序既没有 assumptions 也没有决策卡——冲突要么由老师在访谈里逐条裁决过，要么被静默处理了",
       "evidence": []
-    },
-    {
-      "id": "A6",
-      "name": "学习不僵化",
-      "status": "skip",
-      "detail": "本次运行没有老师反馈，学习外循环未启动",
-      "evidence": []
     }
   ],
   "failed": [],

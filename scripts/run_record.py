@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""运行记录：让"这次到底有没有走技能、走到了哪一步"变成可查的事实。
+"""运行记录：让"这次走到了哪一步"变成可查的事实。
 
-最常见的失败是静默的——模型没有真的执行技能，但输出看起来像是执行了。
-所以每次运行都开一个目录，落 ``meta.json``，并回显一行启动回执。业务侧永远看
-不到这些文件，它们只在定位问题时被读取。
+每次运行都开一个目录并落 ``meta.json``。业务侧不需要操作这些文件，它们只在定位
+问题时被读取。
 
 **这套记账有成本，所以它自带留存期。** 运行目录里躺着访谈原文、素材路径和交付
 正文——它是可定位性的载体，也是一份会无限增长的客户内容留存。``purge`` 把"留多
@@ -38,6 +37,11 @@ EVIDENCE_BOUNDARIES = ("kb", "attachments")
 # 这类漂移正是本技能要消灭的东西——self_check.py --claims 会核对两处是否一致。
 KEEP_DAYS = 90
 KEEP_RUNS = 20
+RUN_META_FIELDS = (
+    "run_id", "started_via", "started_at", "mode", "brand", "brand_key",
+    "brand_asked", "kb_root", "bound", "task_attachments", "evidence_boundary",
+    "stage", "stage_name", "closed_at", "artifacts",
+)
 
 STAGE_NAMES = {
     0: "运行开启",
@@ -80,7 +84,7 @@ def new_run_id(brand_key: str, when: datetime | None = None) -> str:
 
 
 def _unique_run_id(base: str, runs_root: Path) -> str:
-    """同一秒内开两次运行不能共用目录，否则第一次的回执会被第二次覆盖。"""
+    """同一秒内开两次运行不能共用目录，否则第一次的记录会被第二次覆盖。"""
     if not (runs_root / base / "meta.json").is_file():
         return base
     n = 2
@@ -151,7 +155,7 @@ def open_run(
     brand: str | None = None,
     started_via: str = ENTRY,
 ) -> dict[str, Any]:
-    """开一次运行，返回 meta（含 run_id 与要回显的启动回执行）。
+    """开一次运行并返回 meta。
 
     Args:
         brand: 本次要写的品牌。给了就与工作空间绑定的品牌核对，不一致直接拒绝——
@@ -164,8 +168,7 @@ def open_run(
       老师说"参考这两个文件写一篇"是完全正常的请求，为它强制先做一次绑定，等于
       为一个五分钟的任务索要一次知识工程。
 
-    除此之外一律拒绝：否则会开出一次"品牌: 未绑定"的运行，启动回执照样打出来，
-    看起来像正常执行——而那正是最难查的一类失败。
+    除此之外一律拒绝，避免创建没有可用证据边界的运行记录。
     """
     if mode not in MODES:
         raise ValueError(f"mode 必须是 {MODES} 之一，收到 {mode!r}")
@@ -183,7 +186,7 @@ def open_run(
             f"当前项目未绑定品牌知识库，且本次没有给任何附件，无法以「{mode}」模式启动。\n"
             f"两条出路，选一条：\n"
             f"  1. 绑定这个品牌的知识库："
-            f"blueink.py bind --brand <品牌> --teacher <文案老师> --kb <知识库目录>"
+            f"blueink.py bind --brand <品牌> --kb <知识库目录>"
             f"（还没有目录时加 --create 让它建出来）\n"
             f"  2. 本次只参考指定文件，不用知识库：open --mode {mode} --attach <文件绝对路径>"
         )
@@ -196,7 +199,6 @@ def open_run(
         )
 
     brand_name = brand_key = "未绑定"
-    teacher = "未记名"
     kb = ""
     if bound:
         ws = workspace.load(start)
@@ -214,11 +216,10 @@ def open_run(
                     f"没有的话新建一个目录再 bind（加 --create 可以顺带建出知识库骨架）。\n"
                     f"  3. 只想参考几份指定文件、不用知识库："
                     f"在一个没绑定的目录里 open --attach <文件绝对路径>。\n"
-                    f"换品牌或换老师必须新建项目目录；bind --force 只用于同身份迁移"
+                    f"换品牌必须新建项目目录；bind --force 只用于当前品牌迁移"
                     f"知识库路径或确认集合层启发式误判。"
                 )
         brand_name, brand_key = str(ws["brand"]), str(ws["brand_key"])
-        teacher = str(ws.get("teacher") or "未记名")
         kb = str(ws["kb_root"])
     elif attach_only and brand:
         # 没有知识库时，本次品牌只是一个标签：没有任何绑定可以与它冲突。
@@ -241,9 +242,6 @@ def open_run(
     run_dir = workspace.runs_dir(start) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 启动回执要让"这次到底有没有知识库参与"一眼可见。未绑定却照打一行正常回执，
-    # 老师会以为品牌库已经生效，而实际上取证只看了那几份附件。
-    scope = f"品牌: {brand_name}" if bound else f"品牌: {brand_name} · 无知识库·以附件为准"
     meta = {
         "run_id": run_id,
         "started_via": started_via,
@@ -252,7 +250,6 @@ def open_run(
         "brand": brand_name,
         "brand_key": brand_key,
         "brand_asked": (brand or "").strip(),
-        "teacher": teacher,
         "kb_root": kb,
         "bound": bound,
         "task_attachments": task_attachments,
@@ -260,11 +257,6 @@ def open_run(
         "stage": 0,
         "stage_name": STAGE_NAMES[0],
         "closed_at": None,
-        # 回执里带老师，是因为"记忆归属错了"这类问题只有在这里能被一眼看到：
-        # 老师看见的名字不是自己，就说明这个项目被别人绑过。
-        "launch_receipt": (
-            f"BlueInk 已启动 · run-id: {run_id} · {scope} · 老师: {teacher} · 模式: {mode}"
-        ),
     }
     _write_meta(run_dir, meta)
     return meta
@@ -292,9 +284,15 @@ def _meta_path(run_dir: Path) -> Path:
     return run_dir / "meta.json"
 
 
+def _clean_meta(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ValueError("meta.json 顶层不是对象")
+    return {field: data[field] for field in RUN_META_FIELDS if field in data}
+
+
 def _write_meta(run_dir: Path, meta: dict[str, Any]) -> None:
     _meta_path(run_dir).write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(_clean_meta(meta), ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
 
@@ -306,7 +304,7 @@ def load_meta(run_id: str, start=None) -> dict[str, Any]:
     path = _meta_path(run_dir_for(run_id, start))
     if not path.is_file():
         raise FileNotFoundError(f"找不到运行记录 {run_id}（缺 {path}）")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _clean_meta(json.loads(path.read_text(encoding="utf-8")))
 
 
 def set_stage(run_id: str, stage: int, start=None) -> dict[str, Any]:
@@ -365,8 +363,8 @@ def latest(start=None) -> dict[str, Any] | None:
     if not candidates:
         return None
     try:
-        return json.loads(_meta_path(candidates[-1]).read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        return _clean_meta(json.loads(_meta_path(candidates[-1]).read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, OSError, ValueError):
         return None
 
 

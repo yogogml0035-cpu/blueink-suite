@@ -10,18 +10,18 @@
 
 子命令：
 
-    bind         绑定单品牌单老师工作空间（首次；--create 可顺带建知识库骨架）
+    bind         绑定单品牌工作空间（首次；--create 可顺带建知识库骨架）
     status       看当前绑定
     check-brand  本次要写的品牌与当前知识库是否匹配
     index        建立或增量更新旁路索引
     retrieve     按任务检索证据切片
     official     官方来源白名单：查看、追加、访问前校验 URL
-    open         开启一次运行，拿到 run_id 与启动回执行
+    open         开启一次运行并创建运行记录
     stage        标记运行走到了哪一步
     close        归档一次运行
     purge        按留存策略清理旧运行记录
     memory       条件化记忆的读写
-    audit        六项验收契约的机械审计
+    audit        五项验收契约的机械审计
     doctor       一条命令看清当前状态
 
 所有命令都支持 ``--json`` 输出，方便子智能体直接消费。
@@ -64,7 +64,6 @@ def cmd_bind(args: argparse.Namespace) -> int:
     data, warnings = workspace.bind(
         args.brand,
         args.kb,
-        teacher=args.teacher or "",
         brand_key=args.brand_key,
         official_urls=args.official or [],
         notes=args.notes or "",
@@ -78,8 +77,7 @@ def cmd_bind(args: argparse.Namespace) -> int:
         payload,
         args.json,
         [
-            f"已绑定：{data['brand']}（{data['brand_key']}）"
-            f"｜文案老师：{data.get('teacher') or '未记名'}",
+            f"已绑定：{data['brand']}（{data['brand_key']}）",
             f"知识库：{data['kb_root']}",
             f"官方来源白名单：{'、'.join(workspace.official_hosts(data)) or '（空，联网取证前必须先补）'}",
             f"配置写入：{payload['file']}",
@@ -126,7 +124,7 @@ def cmd_check_brand(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     if not workspace.is_bound(args.project):
         payload = {"bound": False,
-                   "hint": "先运行 bind --brand <品牌> --teacher <文案老师> --kb <知识库目录>"
+                   "hint": "先运行 bind --brand <品牌> --kb <知识库目录>"
                            "（这个品牌还没有知识库目录时加 --create）"}
         _emit(payload, args.json, [
             "当前项目未绑定品牌知识库。",
@@ -146,7 +144,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         [
             f"项目根：{project}",
             f"品牌：{data['brand']}（{data['brand_key']}）",
-            f"文案老师：{data.get('teacher') or '未记名（记忆归属无法区分，建议重新绑定）'}",
             f"知识库：{data['kb_root']}" + ("" if root.is_dir() else "  ⚠ 目录已失效，需要重新绑定"),
             f"官方来源：{'、'.join(payload['official_hosts']) or '（空）'}",
             f"绑定时间：{data.get('bound_at')}",
@@ -246,7 +243,6 @@ def cmd_official(args: argparse.Namespace) -> int:
         merged = [item["url"] for item in data.get("official_sources") or []] + list(args.url)
         updated, warnings = workspace.bind(
             str(data["brand"]), str(data["kb_root"]),
-            teacher=str(data.get("teacher") or ""),
             brand_key=str(data.get("brand_key") or ""),
             official_urls=merged,
             corpus_layout=data.get("corpus_layout") or {},
@@ -281,7 +277,7 @@ def cmd_open(args: argparse.Namespace) -> int:
         brand=args.brand,
         started_via=args.started_via,
     )
-    lines = [meta["launch_receipt"],
+    lines = [f"运行：{meta['run_id']}",
              f"运行目录：{run_record.run_dir_for(meta['run_id'], args.project)}"]
     if not meta.get("bound"):
         lines.append(
@@ -344,29 +340,19 @@ def cmd_purge(args: argparse.Namespace) -> int:
 
 def cmd_memory(args: argparse.Namespace) -> int:
     action = args.action
-    # 记忆归属默认跟当前工作空间登记的老师走，除非显式指定
-    owner = args.teacher
-    if owner is None and workspace.is_bound(args.project):
-        owner = str(workspace.load(args.project).get("teacher") or "") or None
 
     if action == "list":
         result = memory_mod.listing(
-            brand=args.brand, teacher=owner, scope=args.scope,
+            brand=args.brand, scope=args.scope,
             min_confidence=args.min_confidence,
             include_retired=args.include_retired, start=args.project,
         )
-        lines = [f"共 {result['count']} 条（老师：{result['teacher']}，"
-                 f"待确认 {len(result['pending_confirmation'])}，"
+        lines = [f"共 {result['count']} 条（待确认 {len(result['pending_confirmation'])}，"
                  f"方法论候选 {result['methodology_candidates']}）"]
         for item in result["items"]:
             lines.append(
                 f"  [{item['confidence']:.2f} {item['tier']}] {item['id']} {item['scope']}"
                 f" · {item['knowledge'][:60]}"
-            )
-        if result.get("other_teachers"):
-            lines.append(
-                f"⚠ 这个项目里还有其他老师的记忆（{'、'.join(result['other_teachers'])}），"
-                f"已排除在外。一个工作空间只服务一位老师——换人请新建项目目录。"
             )
         _emit(result, args.json, lines)
         return 0
@@ -378,11 +364,11 @@ def cmd_memory(args: argparse.Namespace) -> int:
             run_id = args.run or data.get("run_id")
             brand = args.brand or data.get("brand")
             result = memory_mod.add_candidates(
-                candidates, brand=brand, teacher=owner, run_id=run_id, start=args.project
+                candidates, brand=brand, run_id=run_id, start=args.project
             )
         elif args.note:
             result = memory_mod.add_note(
-                args.scope or "session", args.note, brand=args.brand, teacher=owner,
+                args.scope or "session", args.note, brand=args.brand,
                 run_id=args.run, start=args.project,
             )
         else:
@@ -390,7 +376,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
             return 2
         lines = [f"接受 {len(result['accepted'])} 条，"
                  f"转入方法论候选 {len(result['routed_to_methodology'])} 条，"
-                 f"拒绝 {len(result['rejected'])} 条（归属：{result['teacher']}）"]
+                 f"拒绝 {len(result['rejected'])} 条"]
         lines += [f"  ✗ {r['id']}：{r['why']}" for r in result["rejected"]]
         _emit(result, args.json, lines)
         return 0
@@ -444,7 +430,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             print("audit 需要 --input <运行记录目录> 或 --run <run_id>", file=sys.stderr)
             return 2
         target = run_record.run_dir_for(args.run, args.project)
-    result = audit_mod.audit(target, args.memory)
+    result = audit_mod.audit(target)
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -496,13 +482,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if not kb_ok:
         lines.append("  知识库目录已失效（改名、移动或换了电脑）。重新绑定：bind --force")
 
-    owner = str(ws.get("teacher") or "")
-    report["teacher"] = owner
-    lines.append(
-        f"{'✓' if owner else '⚠'} 文案老师："
-        + (owner if owner else "未记名。记忆归属无法区分，换人使用会混合偏好——建议 bind 时补 --teacher")
-    )
-
     hosts = workspace.official_hosts(ws)
     report["official_hosts"] = hosts
     lines.append(
@@ -531,22 +510,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 )
 
     try:
-        mem = memory_mod.listing(brand=str(ws["brand"]), teacher=owner or None, start=args.project)
+        mem = memory_mod.listing(brand=str(ws["brand"]), start=args.project)
         report["memory"] = {
             "count": mem["count"],
             "pending": mem["pending_confirmation"],
             "methodology_candidates": mem["methodology_candidates"],
-            "other_teachers": mem.get("other_teachers") or [],
         }
         lines.append(
             f"✓ 记忆：{mem['count']} 条，待确认 {len(mem['pending_confirmation'])} 条，"
             f"方法论候选 {mem['methodology_candidates']} 条"
         )
-        if mem.get("other_teachers"):
-            lines.append(
-                f"  ⚠ 项目里混有其他老师的记忆：{'、'.join(mem['other_teachers'])}。"
-                f"一个工作空间只服务一位老师，换人请新建项目目录。"
-            )
     except memory_mod.MemoryError_ as exc:
         report["memory_error"] = str(exc)
         lines.append(f"✗ 记忆库有问题：{exc}")
@@ -606,19 +579,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True, parser_class=(
         lambda **kw: argparse.ArgumentParser(parents=[common], **kw)))
 
-    p = sub.add_parser("bind", help="绑定单品牌单老师工作空间")
+    p = sub.add_parser("bind", help="绑定单品牌工作空间")
     p.add_argument("--brand", required=True, help="品牌名，写进稿子要认的那个名字")
     p.add_argument("--kb", required=True, help="该品牌知识库目录")
-    p.add_argument("--teacher", required=True,
-                   help="负责这个品牌的文案老师；必填，记忆归属靠它隔离")
     p.add_argument("--brand-key", dest="brand_key", help="ASCII 短标识，默认自动推导")
     p.add_argument("--official", action="append", help="官方来源域名或 URL，可重复")
     p.add_argument("--notes", help="这个工作空间的特殊约定")
     p.add_argument("--create", action="store_true",
                    help="知识库目录还不存在时，按标准语料布局建出来再绑定")
     p.add_argument("--force", action="store_true",
-                   help="同品牌同老师迁移知识库路径，或确认绕过空目录／集合层启发式；"
-                        "不能改品牌或老师")
+                   help="当前品牌迁移知识库路径，或确认绕过空目录／集合层启发式；"
+                        "不能改品牌")
     p.set_defaults(func=cmd_bind)
 
     p = sub.add_parser("status", help="看当前绑定")
@@ -695,7 +666,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--narrow", help="给旧结论补一条不适用范围")
     p.add_argument("--scope", choices=list(memory_mod.VALID_SCOPES))
     p.add_argument("--brand")
-    p.add_argument("--teacher", help="记忆归属的文案老师，默认取工作空间登记的那位")
     p.add_argument("--run")
     p.add_argument("--min-confidence", dest="min_confidence", type=float)
     p.add_argument("--include-retired", dest="include_retired", action="store_true")
@@ -703,11 +673,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="同一传播事件内的同向证据，只 +0.05")
     p.set_defaults(func=cmd_memory)
 
-    p = sub.add_parser("audit", help="六项验收契约的机械审计")
+    p = sub.add_parser("audit", help="五项验收契约的机械审计")
     p.add_argument("--input", help="运行记录目录")
     p.add_argument("--run", help="run_id，等价于 --input <runs>/<run_id>")
     p.add_argument("--output", help="把结论 JSON 写到这里")
-    p.add_argument("--memory", help="记忆库快照路径（默认自动查找）")
     p.add_argument("--exit-zero", dest="exit_zero", action="store_true",
                    help="只要成功产出结论就退出 0（评测用；人工排查时不要加）")
     p.set_defaults(func=cmd_audit)

@@ -5,7 +5,6 @@
   "mode": "生成",
   "brand": "理想汽车",
   "brand_key": "lixiang",
-  "teacher": "张老师",
   "kb_root": "/kb/理想汽车",
   "bound": true,
   "task_attachments": [
@@ -27,6 +26,5 @@
   "evidence_boundary": "attachments",
   "stage": 9,
   "stage_name": "运行归档",
-  "closed_at": "2026-08-23T10:18:00",
-  "launch_receipt": "BlueInk 已启动 · run-id: 20260823-100000-lixiang · 品牌: 理想汽车 · 老师: 张老师 · 模式: 生成"
+  "closed_at": "2026-08-23T10:18:00"
 }

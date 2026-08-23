@@ -8,7 +8,7 @@
 - 六个角色契约是否都在，写作者是否真的没有检索工具；
 - 文档里引用的文件是否真的存在（断链的"按需读取"等于没有那一节）；
 - 技能本体是否混进了品牌语料或绝对路径（技能必须能整目录复制给另一位老师）；
-- 六项验收契约的名称有没有被悄悄改掉；
+- 五项验收契约的名称有没有被悄悄改掉；
 - 复审日期是否已经越过声明的复审周期；
 - 任务单的必填字段在《编排协议》与 assets 模板两处是否都还在（发散时后写的那份会静默失效）；
 - `evolve --correct` 的落点标题是否还在，以及它有没有跑回 `SKILL.md`（首读层是方法论）；
@@ -29,8 +29,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-# 六项验收契约的名称。改名等于换掉一项验收标准，必须显式。
-CONTRACTS = ("入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效", "学习不僵化")
+# 五项验收契约的名称。改名等于换掉一项验收标准，必须显式。
+CONTRACTS = ("入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效")
 
 ROLES = (
     "evidence-researcher", "editorial-strategist", "professional-writer",
@@ -103,7 +103,7 @@ def check(root: Path) -> list[str]:
             if name not in body and name not in (root / "references/troubleshooting.md").read_text(
                 encoding="utf-8"
             ):
-                problems.append(f"六项验收契约里的「{name}」在文档中找不到")
+                problems.append(f"五项验收契约里的「{name}」在文档中找不到")
 
     # Claude Code 当前支持插件根级单个 SKILL.md。再放一个同名 commands/ 入口会
     # 形成两个 /blueink-suite 定义，不是“双保险”，而是解析顺序依赖。
@@ -199,6 +199,7 @@ def check(root: Path) -> list[str]:
     problems += task_order_fields(root)
     problems += workspace_template_matches(root)
     problems += claude_only_distribution(root)
+    problems += product_voice(root)
     problems += correction_target(root)
     problems += documented_flags(root)
     return problems
@@ -246,6 +247,36 @@ def claude_only_distribution(root: Path) -> list[str]:
     return problems
 
 
+def product_voice(root: Path) -> list[str]:
+    """用户会读到的文档只描述当前产品，不写实现演进过程。"""
+    patterns = (
+        r"破坏性变更", r"第\s*\d+\s*轮(?:审查|修改|迭代)",
+        r"(?:旧版|老版本)(?:逻辑|实现)", r"(?:已经|已)(?:删除|移除)",
+        r"(?:之前|此前)版本", r"迁移自旧版", r"曾经实现",
+    )
+    docs = [
+        root / "SKILL.md", root / "README.md", root / "CHANGELOG.md",
+        root / "DESIGN_NOTES.md", root / "DECISIONS.md", root / "EVOLUTION.md",
+        *sorted((root / "references").glob("*.md")),
+        *sorted((root / "agents").glob("*.md")),
+        *sorted((root / "assets").glob("*.md")),
+        *sorted((root / "evals").glob("*.md")),
+    ]
+    problems: list[str] = []
+    for path in docs:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                line = text.count("\n", 0, match.start()) + 1
+                problems.append(
+                    f"{path.relative_to(root)}:{line} 使用了实现演进口吻：{match.group(0)}"
+                )
+    return problems
+
+
 # 不要求写进文档的参数，逐个给理由。**这是一份显式豁免清单，不是一个开关**：
 # 往这里加一项要在 diff 里被看见，而"文档里找不到的参数一律放过"不会。
 FLAG_EXEMPTIONS = {
@@ -256,12 +287,8 @@ FLAG_EXEMPTIONS = {
 def documented_flags(root: Path) -> list[str]:
     """`blueink.py` 的每个参数都必须在文档里出现过，或在豁免清单里。
 
-    这一条守的是一类真实失败：新增 `--attach` 之后，`SKILL.md` 写了"登记方式见
-    《工作空间与索引》"，而那份文件里根本没有 `--attach`。模型只能 `grep scripts/*.py`
-    去反查机制。**按需读取的前提是被指向的那一份真的写了那件事**——路由本身不产生内容。
-
-    当时修的是那一个实例。这道门堵的是那一类：一个没被任何文档提到的参数，等于一个
-    运行时发现不了的能力。
+    **按需读取的前提是被指向的文档真的写了对应参数**——路由本身不产生内容。
+    一个没被任何文档提到的参数，等于一个运行时发现不了的能力。
     """
     entry = root / "scripts" / "blueink.py"
     if not entry.is_file():
@@ -295,9 +322,7 @@ def documented_flags(root: Path) -> list[str]:
 def correction_target(root: Path) -> list[str]:
     """`evolve.py --correct` 追加纠正的目标标题必须还在。
 
-    这一条守的是一类真实回归：`SKILL.md` 里的 `## Gotchas` 一旦被删掉，
-    而 `--correct` 的实现只按标题匹配——找不到就在文件末尾自己造一个。于是一个
-    刻意精简过的首读层会随着每次纠正慢慢重新长成操作手册，而且没有任何报错。
+    `--correct` 按标题定位反馈区；目标缺失会让反馈落到错误文档位置。
     """
     target = root / "references" / "troubleshooting.md"
     if not target.is_file():

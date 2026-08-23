@@ -40,20 +40,10 @@
       "status": "pass",
       "detail": "通过",
       "evidence": []
-    },
-    {
-      "id": "A6",
-      "name": "学习不僵化",
-      "status": "fail",
-      "detail": "同一记忆库里混了多位老师的偏好（张老师、李老师）——一个工作空间只服务一位老师，换人请新建项目目录",
-      "evidence": [
-        "memory-snapshot.json:items"
-      ]
     }
   ],
   "failed": [
-    "A4",
-    "A6"
+    "A4"
   ],
   "missing_artifacts": []
 }

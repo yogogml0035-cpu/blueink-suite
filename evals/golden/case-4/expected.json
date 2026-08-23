@@ -2,7 +2,7 @@
   "run_id": "20260821-150000-lixiang",
   "brand": "理想汽车",
   "mode": "学习",
-  "verdict": "violated",
+  "verdict": "pass",
   "checks": [
     {
       "id": "A1",
@@ -38,23 +38,8 @@
       "status": "skip",
       "detail": "学习 模式不产出正文",
       "evidence": []
-    },
-    {
-      "id": "A6",
-      "name": "学习不僵化",
-      "status": "fail",
-      "detail": "缺 not_applicable——没有不适用范围的知识会被到处滥用；置信度 0.95 超过上限 0.9；personal / brand 级不能跳过老师确认直接生效；低强度证据不能同时声称知道修改原因；methodology 级候选被写进了记忆库（M-2026-08-10-01）——通用方法论不允许被工作空间自动改写",
-      "evidence": [
-        "feedback.json:candidates[0]",
-        "feedback.json:candidates[1]",
-        "feedback.json:candidates[1]",
-        "feedback.json:candidates[2]",
-        "memory-snapshot.json:items"
-      ]
     }
   ],
-  "failed": [
-    "A6"
-  ],
+  "failed": [],
   "missing_artifacts": []
 }

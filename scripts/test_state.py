@@ -7,7 +7,7 @@ URL 白名单、条件化记忆、审计器。它们如果自己会静默出错�
 这里测的都是**真实发生过或攻击得到的失败形态**，不是覆盖率：
 
 - 绑到品牌集合层能不能被拦住（拦不住 → 一稿混用两套品牌表达）
-- 换品牌／换老师／换知识库改绑能不能被拦住（拦不住 → 索引与记忆归属静默失真）
+- 换品牌／换知识库改绑能不能被正确处理（否则索引归属会静默失真）
 - 历史技能包的 references 会不会被当经验证据取出来（会 → 外部固定模板接管本次判断）
 - 只有元数据的文件会不会被当成"已检索"
 - 符号链接会不会把检索带出绑定目录，跳过项有没有被报出来
@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import audit as audit_mod        # noqa: E402
+import blueink as blueink_cli    # noqa: E402
 import index_kb                  # noqa: E402
 import memory as memory_mod      # noqa: E402
 import miniyaml                  # noqa: E402
@@ -149,7 +150,7 @@ def test_bind(tmp: Path, kb: Path) -> Path:
     try:
         check("下级项目不继承家目录工作空间", workspace.find_project_root(child) is None)
         expect_raises("禁止把家目录绑定成项目根", workspace.WorkspaceError,
-                      workspace.bind, "品牌甲", kb, teacher="张老师", start=fake_home)
+                      workspace.bind, "品牌甲", kb, start=fake_home)
     finally:
         workspace.HOME_DIR = original_home
 
@@ -162,58 +163,46 @@ def test_bind(tmp: Path, kb: Path) -> Path:
         (collection / name).mkdir(parents=True)
         (collection / name / "a.md").write_text("x", encoding="utf-8")
     expect_raises("绑到品牌集合层应被拦截", workspace.WorkspaceError,
-                  workspace.bind, "品牌甲", collection, teacher="张老师", start=tmp / "p_col")
+                  workspace.bind, "品牌甲", collection, start=tmp / "p_col")
     (tmp / "p_col").mkdir(exist_ok=True)
-    data, _ = workspace.bind("品牌甲", collection, teacher="张老师", force=True, start=tmp / "p_col")
+    data, _ = workspace.bind("品牌甲", collection, force=True, start=tmp / "p_col")
     check("--force 可以绕过集合层拦截", data["brand"] == "品牌甲")
 
     # 不存在的目录
     expect_raises("绑不存在的目录应报错", workspace.WorkspaceError,
-                  workspace.bind, "品牌甲", tmp / "查无此目录", teacher="张", start=project)
+                  workspace.bind, "品牌甲", tmp / "查无此目录", start=project)
 
     data, warnings = workspace.bind(
-        "品牌甲", kb, teacher="张老师", official_urls=["https://www.example.com/news"], start=project
+        "品牌甲", kb, official_urls=["https://www.example.com/news"], start=project
     )
     check("绑定写入品牌", data["brand"] == "品牌甲")
-    check("绑定写入老师", data["teacher"] == "张老师", str(data))
+    check("工作空间只返回当前字段", set(data) == set(workspace.WORKSPACE_FIELDS), str(sorted(data)))
     check("官方来源归一化到主域", data["official_sources"][0]["url"] == "https://example.com",
           str(data["official_sources"]))
     check("路径被丢弃时有告警", any("/news" in w for w in warnings), str(warnings))
     ignore = project / ".blueink" / ".gitignore"
     check("本地工作空间默认不进版本控制", ignore.read_text(encoding="utf-8") == "*\n!.gitignore\n")
 
-    # 改绑：品牌、老师、知识库任一变化都要拦
-    for label, kwargs in (
-        ("改品牌", {"brand": "品牌乙", "teacher": "张老师"}),
-        ("改老师", {"brand": "品牌甲", "teacher": "李老师"}),
-    ):
-        exc = expect_raises(f"{label}应被拦截", workspace.WorkspaceError, workspace.bind,
-                            kwargs["brand"], kb, teacher=kwargs["teacher"], start=project)
-        if exc is not None:
-            check(f"{label}的报错要求新项目", "新建项目" in str(exc), str(exc))
-        expect_raises(f"{label}加 --force 也应被拦截", workspace.WorkspaceError,
-                      workspace.bind, kwargs["brand"], kb, teacher=kwargs["teacher"],
-                      force=True, start=project)
+    # 品牌变化必须使用独立项目，--force 不绕过品牌隔离。
+    exc = expect_raises("改品牌应被拦截", workspace.WorkspaceError, workspace.bind,
+                        "品牌乙", kb, start=project)
+    if exc is not None:
+        check("改品牌的报错要求新项目", "新建项目" in str(exc), str(exc))
+    expect_raises("改品牌加 --force 也应被拦截", workspace.WorkspaceError,
+                  workspace.bind, "品牌乙", kb, force=True, start=project)
 
-    # 新工作空间不再允许未记名：否则无法兑现“一位老师”的隔离承诺。
-    plain = tmp / "p_plain"
-    plain.mkdir()
-    err = expect_raises("未登记老师时拒绝", workspace.WorkspaceError,
-                        workspace.bind, "品牌甲", kb, start=plain)
-    check("未登记老师的报错点明隔离原因", "一位老师" in str(err), str(err))
-
-    # 同一品牌同一老师换电脑或移动知识库：只迁移路径，清空可重建索引，
+    # 当前品牌换电脑或移动知识库：只迁移路径，清空可重建索引，
     # 保留官方白名单、学习目录与历史运行。
     moved = tmp / "kb_moved"
     shutil.copytree(kb, moved)
     stale = project / ".blueink" / "index" / "index.json"
     stale.write_text('{"stale": true}', encoding="utf-8")
     expect_raises("知识库路径变化未确认时拒绝", workspace.WorkspaceError,
-                  workspace.bind, "品牌甲", moved, teacher="张老师", start=project)
+                  workspace.bind, "品牌甲", moved, start=project)
     migrated, migrated_warnings = workspace.bind(
-        "品牌甲", moved, teacher="张老师", force=True, start=project
+        "品牌甲", moved, force=True, start=project
     )
-    check("同身份可以迁移知识库路径", migrated["kb_root"] == str(moved.resolve()))
+    check("当前品牌可以迁移知识库路径", migrated["kb_root"] == str(moved.resolve()))
     check("迁移后旧索引已清空", not stale.exists())
     check("迁移后保留官方白名单",
           migrated["official_sources"][0]["url"] == "https://example.com",
@@ -221,6 +210,17 @@ def test_bind(tmp: Path, kb: Path) -> Path:
     check("迁移明确要求重建索引", any("运行 index" in w for w in migrated_warnings),
           str(migrated_warnings))
     check("迁移保留学习目录", (project / ".blueink" / "learning").is_dir())
+
+    parser = blueink_cli.build_parser()
+    subcommands = next(action for action in parser._actions
+                       if "bind" in (getattr(action, "choices", None) or {}))
+    bind_flags = {
+        option for action in subcommands.choices["bind"]._actions for option in action.option_strings
+    }
+    check("绑定命令只暴露当前产品参数", bind_flags == {
+        "-h", "--help", "--project", "--json", "--brand", "--kb", "--brand-key",
+        "--official", "--notes", "--create", "--force",
+    }, str(sorted(bind_flags)))
     return project
 
 
@@ -349,7 +349,7 @@ def test_symlink_skipped(tmp: Path) -> None:
     project = tmp / "p_sym"
     project.mkdir()
     # 一条无关的符号链接不该凭空触发品牌集合层拦截
-    workspace.bind("品牌甲", kb, teacher="张老师", start=project)
+    workspace.bind("品牌甲", kb, start=project)
     result = index_kb.build(start=project)
     paths = [rec["path"] for rec in result["files"]]
     check("符号链接不被跟随", not any("越界链接" in p for p in paths), str(paths))
@@ -420,9 +420,11 @@ def test_official(project: Path) -> None:
 def test_memory(project: Path) -> None:
     run = run_record.open_run("生成", start=project)
     run_id = run["run_id"]
+    check("新运行元数据字段完整", set(run) == set(run_record.RUN_META_FIELDS) - {"artifacts"},
+          str(sorted(run)))
 
     good = {
-        "scope": "personal", "evidence_strength": "high",
+        "scope": "workspace", "evidence_strength": "high",
         "knowledge": "媒体供稿把技术参数转换为可感知场景",
         "trigger": {"category": "媒体观点供稿"}, "not_applicable": ["新闻稿"],
     }
@@ -433,12 +435,13 @@ def test_memory(project: Path) -> None:
     result = memory_mod.add_candidates([good, bad], run_id=run_id, start=project)
     check("合格候选被接受", len(result["accepted"]) == 1, str(result))
     check("缺 not_applicable 被拒", len(result["rejected"]) == 1, str(result))
-    check("候选带老师归属", result["teacher"] == "张老师", str(result))
     mid = result["accepted"][0]
 
-    stored = memory_mod.listing(teacher="张老师", start=project)
-    check("列出时能按老师筛", stored["count"] == 1, str(stored["count"]))
-    check("记忆记了老师", stored["items"][0]["teacher"] == "张老师")
+    stored = memory_mod.listing(start=project)
+    check("列出当前品牌记忆", stored["count"] == 1, str(stored["count"]))
+    check("记忆条目只返回当前字段",
+          set(stored["items"][0]) <= set(memory_mod.MEMORY_FIELDS) | {"tier", "usage"},
+          str(sorted(stored["items"][0])))
 
     # 独立事件必须指向真实运行
     exc = expect_raises("凭空的独立事件应被拒", memory_mod.MemoryError_,
@@ -479,13 +482,22 @@ def test_memory(project: Path) -> None:
     check("methodology 级不在记忆库里",
           all(i.get("scope") != "methodology" for i in store["items"]))
 
-    # 混入另一位老师的记忆要被报出来，而不是静默过滤
-    store["items"].append({**store["items"][0], "id": "M-9999-01-01-01", "teacher": "李老师"})
+    # 低版本状态里的非当前作用域统一收敛到工作空间，不携带额外字段进入产品输出。
+    store["version"] = memory_mod.MEMORY_VERSION - 1
+    store["items"].append({
+        **store["items"][0], "id": "M-0000-00-00-01", "scope": "account",
+        "unexpected_field": "不会进入当前 schema",
+    })
     (workspace.learning_dir(project) / "memory.json").write_text(
         json.dumps(store, ensure_ascii=False), encoding="utf-8"
     )
-    mixed = memory_mod.listing(teacher="张老师", start=project)
-    check("混入的其他老师被报出来", mixed["other_teachers"] == ["李老师"], str(mixed["other_teachers"]))
+    migrated = memory_mod.listing(start=project)
+    migrated_item = next(i for i in migrated["items"] if i["id"] == "M-0000-00-00-01")
+    check("低版本记忆收敛为工作空间作用域", migrated_item["scope"] == "workspace",
+          str(migrated_item))
+    check("低版本记忆不透传额外字段", "unexpected_field" not in migrated_item,
+          str(migrated_item))
+
     return None
 
 
@@ -500,7 +512,6 @@ def test_audit_localises(tmp: Path) -> None:
     (run_dir / "meta.json").write_text(json.dumps({
         "run_id": "T-1", "started_via": "/blueink-suite", "mode": "生成",
         "brand": "品牌甲", "kb_root": str(kb), "bound": True, "stage": 9,
-        "launch_receipt": "BlueInk 已启动 · run-id: T-1 · 品牌: 品牌甲 · 模式: 生成",
     }, ensure_ascii=False), encoding="utf-8")
     (run_dir / "evidence.json").write_text(json.dumps({
         "role": "evidence-researcher", "run_id": "T-1", "task_id": "T1", "status": "ok",
@@ -508,14 +519,14 @@ def test_audit_localises(tmp: Path) -> None:
         "facts": [], "discarded": [],
     }, ensure_ascii=False), encoding="utf-8")
 
-    verdict = audit_mod.audit(str(run_dir), None)
+    verdict = audit_mod.audit(str(run_dir))
     a2 = next(c for c in verdict["checks"] if c["id"] == "A2")
     check("A2 抓出不存在的引用", a2["status"] == "fail", str(a2))
     check("A2 指名了那个文件", "凭空写出的引用" in a2["detail"], str(a2["detail"]))
     check("每条违约都有 evidence", all(c["evidence"] for c in verdict["checks"]
                                      if c["status"] == "fail"))
-    check("六项契约一条不少", [c["id"] for c in verdict["checks"]] ==
-          ["A1", "A2", "A3", "A4", "A5", "A6"], str([c["id"] for c in verdict["checks"]]))
+    check("五项契约一条不少", [c["id"] for c in verdict["checks"]] ==
+          ["A1", "A2", "A3", "A4", "A5"], str([c["id"] for c in verdict["checks"]]))
     check("结论与明细自洽", verdict["failed"] == [c["id"] for c in verdict["checks"]
                                               if c["status"] == "fail"])
 
@@ -577,13 +588,12 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
             "brand": "品牌甲", "kb_root": str(kb), "bound": True, "stage": 2,
             "task_attachments": run_record.register_attachments(attachments, brand="品牌甲"),
             "evidence_boundary": "attachments" if attachments else "kb",
-            "launch_receipt": f"BlueInk 已启动 · run-id: A-{name} · 品牌: 品牌甲 · 模式: 生成",
         }, ensure_ascii=False), encoding="utf-8")
         (run_dir / "evidence.json").write_text(json.dumps({
             "role": "evidence-researcher", "run_id": f"A-{name}", "task_id": "T1",
             "status": "ok", "read_paths": [str(att)], "facts": [], "gaps": [], "discarded": [],
         }, ensure_ascii=False), encoding="utf-8")
-        a2 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A2")
+        a2 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A2")
         if attachments:
             check("登记过的库外附件不判违约", a2["status"] != "fail", str(a2))
         else:
@@ -598,7 +608,6 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         "brand": "品牌甲", "kb_root": str(kb), "bound": True, "stage": 2,
         "task_attachments": run_record.register_attachments([str(att)], brand="品牌甲"),
         "evidence_boundary": "attachments",
-        "launch_receipt": "BlueInk 已启动 · run-id: A-expand · 品牌: 品牌甲 · 模式: 生成",
     }, ensure_ascii=False), encoding="utf-8")
     kb_file = next(p for p in kb.rglob("*.md") if p.is_file())
     (run_dir / "evidence.json").write_text(json.dumps({
@@ -606,7 +615,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         "read_paths": [str(att), str(kb_file.relative_to(kb))],
         "facts": [], "gaps": [], "discarded": [],
     }, ensure_ascii=False), encoding="utf-8")
-    a2 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A2")
+    a2 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A2")
     check("未申报缺口的整库扩张不判违约", a2["status"] != "fail", str(a2))
     check("未申报缺口的整库扩张给可见提示", "没有申报" in a2["detail"], str(a2["detail"]))
 
@@ -619,7 +628,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         "style_refs": [{"path": str(kb_file.relative_to(kb)), "why": "同品牌同场景终稿"}],
         "facts": [], "gaps": [], "discarded": [],
     }, ensure_ascii=False), encoding="utf-8")
-    a2 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A2")
+    a2 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A2")
     check("记进 style_refs 的库内文件不算整库扩张", "没有申报" not in a2["detail"], str(a2["detail"]))
 
     # A4：程序授权的附件与写作回执写法不同（软链接前缀）时不得判越权。
@@ -632,7 +641,6 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         "brand": "品牌甲", "kb_root": str(kb), "bound": True, "stage": 5,
         "task_attachments": run_record.register_attachments([str(att)], brand="品牌甲"),
         "evidence_boundary": "attachments",
-        "launch_receipt": "BlueInk 已启动 · run-id: A-writer · 品牌: 品牌甲 · 模式: 生成",
     }, ensure_ascii=False), encoding="utf-8")
     unresolved, resolved = str(att), str(att.resolve())
     (run_dir / "program.json").write_text(json.dumps({
@@ -649,18 +657,18 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         }, ensure_ascii=False), encoding="utf-8")
 
     _write_receipt([resolved])
-    a4 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A4")
+    a4 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A4")
     check("同一附件的两种路径写法不判越权", a4["status"] != "fail", str(a4))
 
     _write_receipt([resolved, str(tmp / "没授权过.md")])
-    a4 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A4")
+    a4 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A4")
     check("真正未授权的文件仍判越权", a4["status"] == "fail", str(a4))
 
     # 写作者读自己的任务输入 program.json 不算越权——它就是写作者的输入。
     # 不放过这一条会制造纯误报：主智能体忘了把 program.json 写进 authorized_reads
     # 就判违约，而 A4 守的只有"写作阶段重新扫知识库"。
     _write_receipt([resolved, str(run_dir / "program.json")])
-    a4 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A4")
+    a4 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A4")
     check("写作者读运行目录内的自身输入不判越权", a4["status"] != "fail", str(a4))
 
     # A2：运行目录内的上游回执不算越界。策略师读 evidence.json、核验员读
@@ -671,7 +679,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         "read_paths": [str(att), str(run_dir / "program.json")],
         "facts": [], "gaps": [], "discarded": [],
     }, ensure_ascii=False), encoding="utf-8")
-    a2 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A2")
+    a2 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A2")
     check("读运行目录内的上游回执不判越界", a2["status"] != "fail", str(a2))
 
     # A2：路径被写残（绝对路径掐掉前缀）要报出来，并指出成因是路径不完整。
@@ -680,7 +688,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         "read_paths": ["某个上层目录/02-原文资产/需求素材.md"],
         "facts": [], "gaps": [], "discarded": [],
     }, ensure_ascii=False), encoding="utf-8")
-    a2 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A2")
+    a2 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A2")
     check("写残的路径判违约", a2["status"] == "fail", str(a2))
     check("违约文案指出路径不完整", "路径不完整" in a2["detail"], str(a2["detail"]))
 
@@ -696,7 +704,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
     for label, closed, expect_fail in (("未归档", None, False), ("已归档", "2026-08-23T12:00:00", True)):
         meta_path.write_text(json.dumps({**base_meta, "closed_at": closed}, ensure_ascii=False),
                              encoding="utf-8")
-        a5 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A5")
+        a5 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A5")
         check(f"A5 缺 delivery.md · {label}", (a5["status"] == "fail") == expect_fail, str(a5))
     meta_path.write_text(json.dumps(base_meta, ensure_ascii=False), encoding="utf-8")
 
@@ -716,7 +724,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
     (run_dir / "delivery.md").write_text(
         "正文\n\n可进入人工初审\n\n## 实际来源\n- 某来源\n", encoding="utf-8")
     _write_receipt([resolved])
-    a5 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A5")
+    a5 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A5")
     check("只在候选里出现的来源判违约", a5["status"] == "fail", str(a5))
     check("违约文案点名那个文件", "只在候选里出现过" in a5["detail"], str(a5["detail"]))
 
@@ -725,7 +733,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
         "material_plan": {"discarded": []}, "assumptions": [],
     }, ensure_ascii=False), encoding="utf-8")
     _write_receipt([resolved, ghost])
-    a5 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A5")
+    a5 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A5")
     check("真的被打开过的来源不判违约", a5["status"] != "fail", str(a5))
     for name in ("retrievals.json", "verify.json", "delivery.md"):
         (run_dir / name).unlink()
@@ -739,7 +747,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
     ):
         (run_dir / "interview.json").write_text(
             json.dumps(interview, ensure_ascii=False), encoding="utf-8")
-        a3 = next(c for c in audit_mod.audit(str(run_dir), None)["checks"] if c["id"] == "A3")
+        a3 = next(c for c in audit_mod.audit(str(run_dir))["checks"] if c["id"] == "A3")
         check(f"A3 {label}", (a3["status"] == "fail") == expect_fail, str(a3))
         if not expect_fail:
             check("A3 零轮留下可见提示", "零轮访谈" in a3["detail"], str(a3["detail"]))
@@ -757,12 +765,11 @@ def test_kb_onboarding(tmp: Path) -> None:
 
     # 目录不存在且没给 --create：拒绝，并且要告诉他有 --create 这条路。
     err = expect_raises("目录不存在时拒绝绑定", workspace.WorkspaceError,
-                        workspace.bind, "全新品牌", target, teacher="张老师", start=project)
+                        workspace.bind, "全新品牌", target, start=project)
     check("拒绝时指出了 --create", "--create" in str(err), str(err))
     check("拒绝时没有建出目录", not target.exists())
 
-    data, warnings = workspace.bind("全新品牌", target, teacher="张老师",
-                                    create=True, start=project)
+    data, warnings = workspace.bind("全新品牌", target, create=True, start=project)
     check("骨架已建出", target.is_dir())
     for folder in workspace.DEFAULT_CORPUS_LAYOUT.values():
         check(f"建出 {folder}", (target / folder).is_dir())
@@ -782,8 +789,7 @@ def test_kb_onboarding(tmp: Path) -> None:
     afile = tmp / "这是个文件.md"
     afile.write_text("x", encoding="utf-8")
     expect_raises("路径是文件时拒绝", workspace.WorkspaceError,
-                  workspace.bind, "某品牌", afile, teacher="张老师",
-                  create=True, start=tmp / "onboard2")
+                  workspace.bind, "某品牌", afile, create=True, start=tmp / "onboard2")
 
 
 def test_brand_mismatch(tmp: Path) -> None:
@@ -796,7 +802,7 @@ def test_brand_mismatch(tmp: Path) -> None:
     kb = tmp / "kb_mismatch"
     (kb / "01-原文资产").mkdir(parents=True)
     (kb / "01-原文资产" / "a.md").write_text("理想 L9 上市", encoding="utf-8")
-    workspace.bind("理想汽车", kb, teacher="张老师", start=project)
+    workspace.bind("理想汽车", kb, start=project)
     ws = workspace.load(project)
 
     for asked, expected, why in (
@@ -835,8 +841,19 @@ def test_brand_mismatch(tmp: Path) -> None:
     )
     check("Claude Code 命名空间入口被如实记录",
           namespaced["started_via"] == "/blueink-suite:blueink-suite")
+    meta_path = run_record.run_dir_for(namespaced["run_id"], project) / "meta.json"
+    expanded = json.loads(meta_path.read_text(encoding="utf-8"))
+    expanded["unexpected_field"] = "不会进入当前 schema"
+    meta_path.write_text(json.dumps(expanded, ensure_ascii=False), encoding="utf-8")
+    check("读取运行记录时不透传额外字段",
+          "unexpected_field" not in run_record.load_meta(namespaced["run_id"], project))
+    check("读取最近运行时不透传额外字段",
+          "unexpected_field" not in (run_record.latest(project) or {}))
+    run_record.set_stage(namespaced["run_id"], 0, start=project)
+    check("写回运行记录时只保留当前字段",
+          set(json.loads(meta_path.read_text(encoding="utf-8"))) <= set(run_record.RUN_META_FIELDS))
     a1 = next(c for c in audit_mod.audit(
-        str(run_record.run_dir_for(namespaced["run_id"], project)), None
+        str(run_record.run_dir_for(namespaced["run_id"], project))
     )["checks"] if c["id"] == "A1")
     check("命名空间入口通过 A1", a1["status"] != "fail", str(a1))
 
@@ -864,8 +881,6 @@ def test_attachment_only_run(tmp: Path) -> None:
     check("未绑定但有附件可以开启", meta["run_id"])
     check("证据边界强制为附件", meta["evidence_boundary"] == "attachments",
           str(meta["evidence_boundary"]))
-    check("启动回执写明无知识库", "无知识库" in meta["launch_receipt"],
-          meta["launch_receipt"])
     check("记下了本次品牌", meta["brand"] == "某新品牌", str(meta["brand"]))
     check("kb_root 为空", meta["kb_root"] == "", str(meta["kb_root"]))
     check("附件带了哈希", (meta["task_attachments"] or [{}])[0].get("sha256"))
@@ -885,7 +900,7 @@ def test_attachment_only_run(tmp: Path) -> None:
         "status": "ok", "read_paths": [str(one), str(outside)],
         "facts": [], "discarded": [],
     }, ensure_ascii=False), encoding="utf-8")
-    verdict = audit_mod.audit(str(run_dir), None)
+    verdict = audit_mod.audit(str(run_dir))
     a2 = next(c for c in verdict["checks"] if c["id"] == "A2")
     check("附件模式下越界照样抓得到", a2["status"] == "fail", str(a2))
     check("越界报的是那个库外文件", "稿子.md" in a2["detail"], str(a2["detail"]))
@@ -899,11 +914,10 @@ def _interview_run(tmp: Path, name: str, interview: dict) -> dict:
     (run_dir / "meta.json").write_text(json.dumps({
         "run_id": name, "started_via": "/blueink-suite", "mode": "生成",
         "brand": "品牌甲", "kb_root": "", "bound": True, "stage": 1,
-        "launch_receipt": f"BlueInk 已启动 · run-id: {name} · 品牌: 品牌甲 · 模式: 生成",
     }, ensure_ascii=False), encoding="utf-8")
     (run_dir / "interview.json").write_text(
         json.dumps(interview, ensure_ascii=False), encoding="utf-8")
-    verdict = audit_mod.audit(str(run_dir), None)
+    verdict = audit_mod.audit(str(run_dir))
     return next(c for c in verdict["checks"] if c["id"] == "A3")
 
 

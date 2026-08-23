@@ -38,13 +38,6 @@
       "status": "skip",
       "detail": "运行还没归档，尚未走到交付（缺 delivery.md）",
       "evidence": []
-    },
-    {
-      "id": "A6",
-      "name": "学习不僵化",
-      "status": "skip",
-      "detail": "本次运行没有老师反馈，学习外循环未启动",
-      "evidence": []
     }
   ],
   "failed": [],

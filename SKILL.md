@@ -4,7 +4,7 @@ description: >-
   蓝墨 BlueInk——证据驱动的汽车公关文案编辑决策系统。不是规则库：每次任务重新判断事实边界、传播主线、素材取舍
   和信息权重，动态形成一份只对本次有效的"写作程序"，再交给互相隔离的写作与审查职责执行；反馈修正的是判断条件
   与证据权重，不是不断增加固定规则。用于新闻稿、媒体供稿、邀请函、传播指引、核心信息、演讲稿、QA、社会化文案、
-  视频脚本、串词等公关文案生成。新工作空间必须绑定一个品牌知识库和一位文案老师；绑定完成后的索引与写作流程只读源库。
+  视频脚本、串词等公关文案生成。新工作空间绑定一个品牌知识库；绑定完成后的索引与写作流程只读源库。
   必须由 Claude Code 显式命令启动，默认入口 /blueink-suite。
 license: proprietary
 disable-model-invocation: true
@@ -75,7 +75,7 @@ $BLUEINK open --mode 生成 --brand "<本次品牌>" --attach "<文件绝对路�
 
 ```bash
 $BLUEINK status                      # 退出码 1 = 未绑定
-$BLUEINK bind --brand "<品牌>" --teacher "<文案老师>" --kb "<知识库目录绝对路径>" \
+$BLUEINK bind --brand "<品牌>" --kb "<知识库目录绝对路径>" \
               [--official "<官网>"]
 $BLUEINK index
 ```
@@ -106,19 +106,11 @@ $BLUEINK check-brand --brand "<本次品牌>"
 
 只有五条，跨全流程适用；其余全部按需读取。
 
-1. **只由 Claude Code 显式入口启动。** 默认使用裸命令 `/blueink-suite`；如果另一插件占用了同名裸命令，Claude Code 的规范化入口是 `/blueink-suite:blueink-suite`。两者指向同一个 Skill，不保留 `/blueink` 别名。frontmatter 的 `disable-model-invocation: true` 关闭模型自动触发。
-2. **一个工作空间一个品牌、一位文案老师。** 新绑定不允许老师留空；换品牌或换人就换项目。同品牌同老师在换电脑或移动知识库后可以迁移路径，但必须重建索引。`bind --create` 会显式创建空知识库骨架；此后的索引与写作流程不改写源库。
+1. **只由 Claude Code 显式入口启动。** 默认使用裸命令 `/blueink-suite`；如果另一插件占用了同名裸命令，Claude Code 的规范化入口是 `/blueink-suite:blueink-suite`。两者指向同一个 Skill。frontmatter 的 `disable-model-invocation: true` 关闭模型自动触发。
+2. **一个工作空间只绑定一个品牌知识库。** 换品牌就换项目；当前品牌在换电脑或移动知识库后可以迁移路径，但必须重建索引。`bind --create` 会显式创建空知识库骨架；此后的索引与写作流程不改写源库。
 3. **主智能体只对话、路由、裁决**——不写正文，不在最后偷偷重写，不替子智能体补事实。一旦允许它润色，"表达问题"就再也无法归因。
 4. **事实必须有来源；冲突显式上交老师裁决，不静默选边。** 静默选边把一个可见的分歧变成一个不可见的错误。
 5. **反馈先成为带条件的候选证据。** 一次修改不直接变成规则；判不准归属时归到更窄的范围，不是更宽的。
-
-**启动回执是硬要求。** 收到显式调用后，第一句回复必须是这一行，不加寒暄、不加总结：
-
-```
-BlueInk 已启动 · run-id: <run_id> · 品牌: <brand> · 老师: <teacher> · 模式: <生成 | 绑定 | 学习 | 定位>
-```
-
-`run_id` 来自 `open`。**这一行让"这次到底有没有真的走技能"变成一眼可判、事后可查的事实。看不到这一行，就是没走技能。**
 
 确定性工作一律交给脚本而不是 Agent：文件扫描、哈希、增量索引、路径校验、URL 白名单、运行记录、契约审计。入口只有一个 `scripts/blueink.py`。Claude Code 会把 `${CLAUDE_PLUGIN_ROOT}` 与 `${CLAUDE_PROJECT_DIR}` 替换为当前机器的原生绝对路径；不要把作者电脑或安装缓存路径写死进任务单。
 
@@ -158,6 +150,6 @@ BlueInk 已启动 · run-id: <run_id> · 品牌: <brand> · 老师: <teacher> ·
 | 成稿后；核对卡、来源清单、A/B 呈现、结论口径 | `${CLAUDE_PLUGIN_ROOT}/references/delivery-contract.md` |
 | 收到老师反馈；判断某条记忆能否自动参与写作 | `${CLAUDE_PLUGIN_ROOT}/references/conditional-memory.md` |
 | 稿子不对要定位到具体角色和文件；审计结论怎么读；本地环境的反直觉事实 | `${CLAUDE_PLUGIN_ROOT}/references/troubleshooting.md` |
-| 判断某个新增设计是否违背核心命题 | `${CLAUDE_PLUGIN_ROOT}/references/methodology-core.md` |
+| 判断某项设计是否违背核心命题 | `${CLAUDE_PLUGIN_ROOT}/references/methodology-core.md` |
 
-**第一版只负责文案生成。** 不做 Word 排版、字体、配图、品牌文档模板，也不建设改稿编排与版本回退。
+**能力边界：**负责文案生成，不做 Word 排版、字体、配图、品牌文档模板，也不建设改稿编排与版本回退。

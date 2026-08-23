@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
-"""单品牌单老师工作空间：绑定、读取与路径归属判断。
+"""单品牌工作空间：绑定、读取与路径归属判断。
 
 跨品牌污染不靠提示词防，靠**检索根只有一个**。这个模块就是那个唯一的根的
-来源：`.blueink/workspace.yaml` 记录本项目绑定的品牌、负责这个品牌的文案老师
-与知识库目录，之后所有检索都只从这个根出发。
-
-**为什么要记老师是谁。** 品牌隔离挡不住个人偏好互相污染：同一个品牌可能由两位
-老师分别负责不同稿件，条件化记忆学的是"这位老师在什么条件下通常如何判断"，混在
-一起就学成了一个不存在的平均人。所以工作空间同时锁品牌和锁人——换品牌或换人都
-要换项目。
+来源：`.blueink/workspace.yaml` 记录本项目绑定的品牌与知识库目录，之后所有检索都
+只从这个根出发。
 """
 
 from __future__ import annotations
@@ -26,8 +21,12 @@ import official
 
 BLUEINK_DIR = ".blueink"
 WORKSPACE_FILE = "workspace.yaml"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 HOME_DIR = Path.home().resolve()
+WORKSPACE_FIELDS = (
+    "version", "brand", "brand_key", "kb_root", "bound_at",
+    "official_sources", "corpus_layout", "notes",
+)
 
 # 常见文本格式：绑定时用来判断这个目录里到底有没有可用语料
 TEXT_EXTS = {".md", ".markdown", ".txt", ".text", ".json", ".yaml", ".yml", ".csv"}
@@ -75,8 +74,7 @@ def find_project_root(start: str | os.PathLike[str] | None = None) -> Path | Non
     """
     cur = Path(start or Path.cwd()).resolve()
     for candidate in [cur, *cur.parents]:
-        # 家目录不是项目边界。旧版本若误在家目录 bind，不能让其下所有项目静默
-        # 继承同一品牌与老师；只有用户真的站在家目录本身时才允许读旧状态做迁移。
+        # 家目录不是项目边界，不能让其下所有项目静默继承同一品牌工作空间。
         if candidate == HOME_DIR and cur != HOME_DIR:
             continue
         if (candidate / BLUEINK_DIR).is_dir():
@@ -137,11 +135,8 @@ def load(start: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     for field in ("brand", "kb_root"):
         if not data.get(field):
             raise WorkspaceError(f"{path} 缺少必填字段 {field}")
-    data.setdefault("version", SCHEMA_VERSION)
+    data["version"] = SCHEMA_VERSION
     data.setdefault("brand_key", derive_brand_key(str(data["brand"])))
-    # teacher 是 v2 新增。v1 的工作空间照旧能读，但记忆归属会标成"未记名"，
-    # doctor 会提示重新绑定——不因为一个新字段就让老工作空间失效。
-    data.setdefault("teacher", "")
     data.setdefault("official_sources", [])
     data.setdefault("corpus_layout", {})
     data.setdefault("notes", "")
@@ -149,12 +144,7 @@ def load(start: str | os.PathLike[str] | None = None) -> dict[str, Any]:
         data["official_sources"] = []
     if data.get("corpus_layout") is None:
         data["corpus_layout"] = {}
-    return data
-
-
-def bound_teacher(start: str | os.PathLike[str] | None = None) -> str:
-    """当前工作空间登记的文案老师。v1 老工作空间返回空串。"""
-    return str(load(start).get("teacher") or "")
+    return {field: data[field] for field in WORKSPACE_FIELDS if field in data}
 
 
 def kb_root(start: str | os.PathLike[str] | None = None) -> Path:
@@ -329,7 +319,6 @@ def bind(
     brand: str,
     kb: str | os.PathLike[str],
     *,
-    teacher: str = "",
     brand_key: str | None = None,
     official_urls: list[str] | None = None,
     corpus_layout: dict[str, str] | None = None,
@@ -338,7 +327,7 @@ def bind(
     create: bool = False,
     start: str | os.PathLike[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
-    """把品牌、文案老师与知识库目录写进当前项目的 ``.blueink/workspace.yaml``。
+    """把品牌与知识库目录写进当前项目的 ``.blueink/workspace.yaml``。
 
     Args:
         create: 目录不存在时按标准语料布局建出来，而不是报错。老师手上还没有
@@ -348,33 +337,26 @@ def bind(
         (写入的配置, 需要提示给用户的告警列表)
 
     Raises:
-        WorkspaceError: 品牌或老师为空、目录不存在（且未给 ``create``）、目录里没有
-            可读文本、绑到了品牌集合层、官方域名格式无效、试图改品牌／老师，或同身份
-            迁移知识库路径但未加 ``force``。
+        WorkspaceError: 品牌为空、目录不存在（且未给 ``create``）、目录里没有可读
+            文本、绑到了品牌集合层、官方域名格式无效、试图改品牌，或迁移知识库路径
+            但未加 ``force``。
     """
     warnings: list[str] = []
     brand = str(brand).strip()
-    teacher = str(teacher).strip()
     if not brand:
         raise WorkspaceError("品牌不能为空。")
-    if not teacher:
-        raise WorkspaceError(
-            "文案老师不能为空（--teacher）。条件化记忆按老师隔离；"
-            "允许未记名，就无法兑现‘一个工作空间一位老师’。"
-        )
 
     base = Path(start or Path.cwd()).resolve()
     if base == HOME_DIR:
         raise WorkspaceError(
             "不能把用户家目录绑定成 BlueInk 项目根；否则这台电脑上的下级项目会共享"
-            "同一品牌与老师。请新建一个具体项目目录后再 bind。"
+            "同一品牌工作空间。请新建一个具体项目目录后再 bind。"
         )
     target = base / BLUEINK_DIR / WORKSPACE_FILE
     root = Path(kb).expanduser()
     candidate_root = root.resolve()
     existing: dict[str, Any] | None = None
     root_changed = False
-    identity_migrated = False
     if target.is_file():
         loaded = miniyaml.load_file(target)
         if not isinstance(loaded, dict):
@@ -382,28 +364,11 @@ def bind(
         existing = loaded
 
         old_brand = str(existing.get("brand") or "").strip()
-        old_teacher = str(existing.get("teacher") or "").strip()
         if old_brand and normalize_brand(old_brand) != normalize_brand(brand):
             raise WorkspaceError(
                 f"当前项目绑定的是「{old_brand}」，不能改成「{brand}」。"
-                "换品牌请新建项目目录；--force 只用于同一品牌同一老师迁移知识库路径，"
-                "不绕过工作空间身份隔离。"
-            )
-        if old_teacher and old_teacher != teacher:
-            raise WorkspaceError(
-                f"当前项目属于文案老师「{old_teacher}」，不能改成「{teacher}」。"
-                "换老师请新建项目目录；--force 不绕过老师隔离。"
-            )
-        if not old_teacher and not force:
-            raise WorkspaceError(
-                "这是一个旧版未记名工作空间。补登记老师会改变记忆归属，"
-                "请确认后加 --force；已有未记名记忆仍需人工复核。"
-            )
-        if not old_teacher:
-            identity_migrated = True
-            warnings.append(
-                "旧版未记名工作空间已补登记老师；已有未记名记忆不会自动改归属，"
-                "请在使用前人工复核。"
+                "换品牌请新建项目目录；--force 只用于当前品牌迁移知识库路径，"
+                "不绕过品牌隔离。"
             )
 
         old_root = Path(str(existing.get("kb_root") or "")).expanduser().resolve()
@@ -411,7 +376,7 @@ def bind(
         if root_changed and not force:
             raise WorkspaceError(
                 f"知识库路径将由「{old_root}」改为「{candidate_root}」。"
-                "同一品牌同一老师换电脑或移动目录时加 --force；系统会清空可重建索引，"
+                "当前品牌换电脑或移动目录时加 --force；系统会清空可重建索引，"
                 "保留学习记忆与历史运行。"
             )
 
@@ -502,7 +467,6 @@ def bind(
         "version": SCHEMA_VERSION,
         "brand": brand,
         "brand_key": (brand_key or derive_brand_key(brand)).strip(),
-        "teacher": teacher,
         "kb_root": str(root),
         "bound_at": date.today().isoformat(),
         "official_sources": normalized,
@@ -515,13 +479,13 @@ def bind(
     ignore = target.parent / ".gitignore"
     if not ignore.exists():
         ignore.write_text("*\n!.gitignore\n", encoding="utf-8")
-    if root_changed or identity_migrated:
+    if root_changed:
         stale_index = target.parent / "index"
         if stale_index.exists():
             shutil.rmtree(stale_index)
-        reason = "知识库路径已迁移" if root_changed else "工作空间已从未记名迁移为记名"
         warnings.append(
-            f"{reason}：已清空可重建索引；学习记忆与历史运行仍保留。请立即运行 index。"
+            "知识库路径已迁移：已清空可重建索引；学习记忆与历史运行仍保留。"
+            "请立即运行 index。"
         )
     for sub in ("index", "learning", "runs"):
         (base / BLUEINK_DIR / sub).mkdir(parents=True, exist_ok=True)

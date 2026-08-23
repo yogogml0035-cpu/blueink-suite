@@ -163,8 +163,6 @@ def search(
             mismatches.append(f"知识库根 {index_root} != {current_root}")
         if str(index.get("brand") or "") != str(ws.get("brand") or ""):
             mismatches.append(f"品牌 {index.get('brand')} != {ws.get('brand')}")
-        if str(index.get("teacher") or "") != str(ws.get("teacher") or ""):
-            mismatches.append(f"老师 {index.get('teacher') or '未记名'} != {ws.get('teacher')}")
         if mismatches:
             raise workspace.WorkspaceError(
                 "当前索引不属于这个工作空间：" + "；".join(mismatches)
@@ -245,7 +243,6 @@ def search(
 
     return {
         "brand": index.get("brand"),
-        "teacher": index.get("teacher") or "",
         "kb_root": index.get("kb_root"),
         "query": query,
         "category": category,

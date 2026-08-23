@@ -40,13 +40,6 @@
       "evidence": [
         "verify.json:sources_used"
       ]
-    },
-    {
-      "id": "A6",
-      "name": "学习不僵化",
-      "status": "skip",
-      "detail": "本次运行没有老师反馈，学习外循环未启动",
-      "evidence": []
     }
   ],
   "failed": [

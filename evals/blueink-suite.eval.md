@@ -4,7 +4,7 @@
 
 这里评的是另三件事：
 
-1. **六项验收契约的审计器是否可靠。** 它是"出问题不知道问题出在哪个 md"的解法，所以它自己必须先没有静默失败。
+1. **五项验收契约的审计器是否可靠。** 它是"出问题不知道问题出在哪个 md"的解法，所以它自己必须先没有静默失败。
 2. **确定性状态层是否还守着它声称的边界。** 绑定拦截、指令产物隔离、URL 白名单、置信度规则——这些如果自己会静默出错，上面那句承诺就是空的。
 3. **技能对外的声明与实际是否一致。** 声明的 Python 底线在底线版本上真的跑得起来、文档里的检查项数没有过期、子命令没有偷偷长出声明过不做的能力。这三类漂移都不会报错，只会在某一天被人发现。
 
@@ -12,11 +12,11 @@
 
 ```bash
 python3 scripts/blueink.py audit --input <运行记录目录> --output <结论.json>
-python3 scripts/test_state.py          # 状态层回归，171 项检查
+python3 scripts/test_state.py          # 状态层回归，173 项检查
 python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致性 / 变异承重
 ```
 
-审计器的输入是一次运行的调用轨迹目录，输出是六项契约的审计结论。十三个 golden 用例是十三种真实失败与合规形态的运行记录夹具。
+审计器的输入是一次运行的调用轨迹目录，输出是五项契约的审计结论。十三个 golden 用例是十三种真实失败与合规形态的运行记录夹具。
 
 ## 检查分两层
 
@@ -24,13 +24,13 @@ python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致
 
 | id | 检查 | 为什么它不可省 |
 |---|---|---|
-| `schema` | 结论含 run_id / mode / verdict / checks / failed / missing_artifacts；checks 恰好 6 条且 id 依次为 A1—A6；每条含 id/name/status/detail/evidence | 少一条契约就等于少查一类问题，而且是静默的 |
+| `schema` | 结论含 run_id / mode / verdict / checks / failed / missing_artifacts；checks 恰好 5 条且 id 依次为 A1—A5；每条含 id/name/status/detail/evidence | 少一条契约就等于少查一类问题，而且是静默的 |
 | `consistent` | `failed` 与 checks 里的 fail 项完全一致；verdict 由 failed / missing 推出 | 结论与明细不一致时，人会相信结论，于是违约被漏掉 |
 | `localisable` | 每条 fail 都给出非空 evidence，且每个 evidence 都指向一个具体文件 | 这是整个技能存在的理由——不能定位到文件的批评等于没有批评 |
 | `explained` | 每条检查的 detail 非空；被跳过的检查不能写成「通过」 | 把"没查"伪装成"查过了"是最危险的一种输出 |
-| `contracts` | 六项名称依次为：入口唯一、单品牌隔离、动态访谈、责任隔离、输出有效、学习不僵化 | 防止某项契约被悄悄改名或换掉 |
+| `contracts` | 五项名称依次为：入口唯一、单品牌隔离、动态访谈、责任隔离、输出有效 | 防止某项契约被悄悄改名或换掉 |
 
-**状态层回归检查**（`state-layer` / `explicit-entry` / `role-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计和附件登记，共 171 项。
+**状态层回归检查**（`state-layer` / `explicit-entry` / `role-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计和附件登记，共 173 项。
 
 **自证检查**（`self-claims` / `self-mutation` / `pipeline-wiring`）验的是"声明与实际是否一致"这一类不会报错的漂移。其中 `self-mutation` 是这份规格里唯一的**负向**检查：它真的往技能副本里注入七个已知失败形态，断言每一个都会让指定检查转红。
 
@@ -47,9 +47,9 @@ python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致
 | `case-1` | 完全合规的一次生成：三轮访谈各一问、事实全部有来源、写作者只读授权文件、结论口径正确 | `pass` | val |
 | `case-2` | 证据研究员读了另一个品牌目录、正文混入其他客户产品、写作者读了程序未授权的文件 | `violated` A2+A4 | val |
 | `case-3` | 第一轮一次问了三个问题、缺停止理由；两处事实无来源却写成"可进入人工初审" | `violated` A3+A5 | val |
-| `case-4` | 候选知识缺不适用范围、置信度 0.95 越界、personal 级跳过确认、低强度证据声称知道原因、methodology 级被写进记忆库 | `violated` A6 | val |
+| `case-4` | 完成一次学习运行：反馈归因回执完整，候选知识带触发条件与不适用范围 | `pass` | val |
 | `case-5` | 访谈到一半因缺关键输入暂停，后续回执全缺 | `incomplete` | **test（保留测试）** |
-| `case-6` | 写作回执缺 `deviations` 字段；记忆库里混了两位老师的偏好 | `violated` A4+A6 | val |
+| `case-6` | 写作回执缺 `deviations` 字段 | `violated` A4 | val |
 | `case-7` | 附件驱动的一次生成：两份附件都在绑定库之外、已登记，全程只读附件，一轮访谈收敛 | `pass` | val |
 | `case-8` | 声明以附件为准，却在没有申报任何缺口的情况下扩展读了三个库内文件 | `pass` + A2 携带浪费提示 | val |
 | `case-9` | 零轮访谈：附件把交付合同和证据边界都封闭了，一个合法问题都没有，`stopped_because` 写清了为什么 | `pass` + A3 携带零轮提示 | val |
@@ -66,15 +66,15 @@ python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致
 
 `case-9` 锁的是一类**误报**：附件把一切都说清时主智能体没有问任何问题，并在 `stopped_because` 里写清"主线判断属策略师职责，主智能体不得预先拍定后再向老师求证"——把空 `rounds` 一律判违约就会误伤它。**判它违约会训练出"为了过审计随便问一句"的行为，那比不问更糟。** 现在零轮合法，但必须写清理由（没有理由的零轮与"根本没访谈"在证据上不可区分），并在 `detail` 里留一条可见提示让人复核。
 
-`case-11` 锁的是**"静默选边"这条最重的失职此前没有任何检查覆盖**。取证报了冲突，主智能体把它们处理掉却不留可见记录——六项契约原来全部通过。现在 A5 会指出来。判 `note` 而不是 `violated` 是因为老师在访谈里逐条裁决过时 `assumptions` 合法地为空，而"他到底裁决了没有"机器判不准；误报会让人学会忽略整条 A5，代价比这条漏网更大。
+`case-11` 锁的是**静默选边**。取证报了冲突，主智能体把它们处理掉却不留可见记录时，A5 会给出提示。判 `note` 而不是 `violated` 是因为老师在访谈里逐条裁决过时 `assumptions` 合法地为空，而"他到底裁决了没有"机器判不准；误报会让人学会忽略整条 A5，代价比这条漏网更大。
 
-`case-10` 锁的是一条**第 19 轮审查找出来的静默漏洞**：A5 原来把 `retrievals.json` 的候选命中也算成"读过"，于是来源清单可以引用一份从没被任何角色打开过的文件而照样通过。**候选清单是"检索返回了什么"，不是"谁打开了什么"**（`retrieve` 刻意不返回全文），把两者混同等于放过一种凭空写出的引用。现在 A5 只认真的被打开过的路径；A2 仍然算候选，因为一次返回了根外路径的检索本身就是隔离失效。
+`case-10` 区分 `retrievals.json` 的候选命中与角色实际读取。**候选清单是"检索返回了什么"，不是"谁打开了什么"**（`retrieve` 刻意不返回全文）；A5 只认真的被打开过的路径。A2 仍然检查候选，因为一次返回根外路径的检索本身就是隔离失效。
 
-`case-7` 与 `case-8` 是证据边界机制的两面。**`case-7` 防漏报之外的另一种错误——误报**：老师给的文件不在绑定库里，但已经登记；如果审计把它判成越界，运行逻辑与审计合同就会互相打架。**`case-8` 证明浪费是可见的**：它的六项契约全部通过，因为扩展检索本身不违约；但 A2 的 `detail` 里带着"声明以附件为准却没申报缺口就读了 N 个库外文件"这句话。判 `note` 而不是 `violated` 是有意的——真出现高影响缺口时扩展是对的，缺的只是把缺口写出来。
+`case-7` 与 `case-8` 是证据边界机制的两面。**`case-7` 防误报**：老师给的文件不在绑定库里，但已经登记，因此属于合法证据。**`case-8` 让浪费可见**：它的五项契约全部通过，因为扩展检索本身不违约；但 A2 的 `detail` 会指出"声明以附件为准却没申报缺口就读了 N 个库外文件"。判 `note` 而不是 `violated` 是有意的——真出现高影响缺口时扩展是对的，缺的只是把缺口写出来。
 
-**夹具之间的契约是相互独立的。** `case-2` 的 A5 是通过的，`case-6` 只有 A4 与 A6 失败、其余四项全通过——这是刻意设计：一项违约不能连带另一项，否则定位就退化成"哪儿都有问题"。
+**夹具之间的契约相互独立。** `case-2` 的 A5 通过，`case-6` 只有 A4 失败、其余四项通过：一项违约不能连带另一项，否则定位会退化成"哪儿都有问题"。
 
-`case-6` 存在的理由是一条纪律：**新增一项契约检查，就必须同时给它一个夹具。** 没有夹具的检查等于没人验证过它会不会误报或漏报。`case-7`、`case-8`、`case-13` 都是这条纪律的执行结果。
+每项契约检查都有对应夹具，避免只验证合规输入而漏掉误报与漏报。
 
 ## 怎么跑
 
@@ -122,7 +122,7 @@ python3 scripts/evolve.py                                # 一次跑完上面全
   "skill": "blueink-suite",
   "run": "python3 scripts/blueink.py audit --input {input} --output {output} --exit-zero",
   "criteria": [
-    {"id": "schema", "text": "审计结论结构完整，六项契约一条不少", "type": "command",
+    {"id": "schema", "text": "审计结论结构完整，五项契约一条不少", "type": "command",
      "cmd": "python3 scripts/blueink.py check-verdict {output} --check schema"},
     {"id": "consistent", "text": "verdict 与 failed、missing_artifacts 自洽", "type": "command",
      "cmd": "python3 scripts/blueink.py check-verdict {output} --check consistent"},
@@ -130,7 +130,7 @@ python3 scripts/evolve.py                                # 一次跑完上面全
      "cmd": "python3 scripts/blueink.py check-verdict {output} --check localisable"},
     {"id": "explained", "text": "每条检查都有说明，跳过的不伪装成通过", "type": "command",
      "cmd": "python3 scripts/blueink.py check-verdict {output} --check explained"},
-    {"id": "contracts", "text": "六项契约名称未被改名或替换", "type": "command",
+    {"id": "contracts", "text": "五项契约名称未被改名或替换", "type": "command",
      "cmd": "python3 scripts/blueink.py check-verdict {output} --check contracts"},
     {"id": "state-layer", "text": "绑定拦截、指令产物隔离、Office 抽取、符号链接跳过、URL 白名单、置信度升降、内容哈希增量、审计定位与附件登记全部通过真实临时目录回归", "type": "command",
      "cmd": "python3 scripts/test_state.py"},

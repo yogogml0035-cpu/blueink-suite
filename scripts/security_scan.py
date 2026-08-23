@@ -48,7 +48,7 @@ RULES: list[tuple[str, str, dict[str, str]]] = [
                                "不给删除入口等于承诺永久留存客户内容",
       "scripts/self_check.py": "变异门在自己用 tempfile.mkdtemp 创建的技能副本里施加变异，"
                                "跑完就删；变异必须发生在副本上，绝不能改真实技能目录",
-      "scripts/workspace.py": "同品牌同老师迁移知识库路径时，只删除项目内 .blueink/index/；"
+      "scripts/workspace.py": "当前品牌迁移知识库路径时，只删除项目内 .blueink/index/；"
                               "该目录完全可重建，目标由固定工作空间路径构造，不接受外部删除目标；"
                               "learning/、runs/ 与 kb_root 均不触及"}),
     (r"\brequests\.|urllib\.request\.urlopen|\burlopen\s*\(|http\.client\.", "脚本层直接联网",

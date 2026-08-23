@@ -51,7 +51,7 @@
 
 **为什么这是默认而不是可选。** 写作者、策略师、核验员、反方、归因员都**没有检索工具**，这是设计的一部分：写作阶段重新翻库等于在成稿时偷偷换了一次素材选择，核验员有搜索能力就会在发现某句话没依据时顺手找一个来源把它圆上。这些边界只有在原生注册时才由工具层强制执行。走 `general-purpose` 时它们全都拿到全套工具，边界退化成自律，只能靠审计 A4 事后发现——发现得到，但那时稿子已经写完了。
 
-六个角色随 Claude Code 插件的根级 `agents/` 自动注册。直装脚本复制的是完整插件，不再向全局 agents 目录写第二份角色文件；否则版本更新或多份安装会留下同名旧角色。
+六个角色随 Claude Code 插件的根级 `agents/` 自动注册。直装脚本复制完整插件，不向全局 agents 目录写第二份角色文件，避免同名角色产生解析歧义。
 
 任务单直接作为 prompt 传给子智能体。**它是一份委托，不是一份答案。**
 
@@ -61,7 +61,6 @@ run_id: 20260822-143512-lixiang
 task_id: T1
 role: evidence-researcher
 brand: 理想汽车
-teacher: 张老师
 kb_root: <当前电脑上的理想汽车知识库绝对路径>
 skill_root: <Claude Code 当前插件根绝对路径>
 project_root: <当前项目根绝对路径>
@@ -142,7 +141,7 @@ expect: <当前项目根绝对路径>/.blueink/runs/20260822-143512-lixiang/evid
 ## 五 · 标准流程
 
 ```
-0  运行开启      blueink.py open       → run_id、启动回执行
+0  运行开启      blueink.py open       → run_id、meta.json
 1  访谈          主智能体 ↔ 老师            → interview.json（每轮追加）
 2  取证          证据研究员                 → evidence.json
    ↳ 冲突或高影响缺口 → 回 1 追问，不自己选边
@@ -259,6 +258,7 @@ diff、需要知道哪一段是上一轮哪个判断的产物，而这三样本�
 
 ```bash
 $BLUEINK open --mode 生成          # 品牌取自工作空间，不用也不能在这里传
+$BLUEINK stage --run <run_id> --to <阶段编号>
 $BLUEINK close --run <run_id>
 $BLUEINK audit --input "<当前项目根>/.blueink/runs/<run_id>" --output "<当前电脑临时目录>/verdict.json"
 $BLUEINK purge                     # 试运行：打印将删除哪些旧运行
@@ -267,4 +267,4 @@ $BLUEINK purge --apply             # 真的删
 
 `purge` 默认试运行。删除范围只到项目内 `.blueink/runs/<run_id>/` 这一层派生物，**永不触及源知识库**——源库只读是本技能最硬的一条承诺，清理留存不是它的例外。
 
-审计器把六项验收契约变成机械检查。**每次运行结束都跑一次 audit**，它比人眼更早发现"写作者其实重新扫了库""访谈其实是问卷""来源其实没覆盖"。
+审计器把五项验收契约变成机械检查。**每次运行结束都跑一次 audit**，它比人眼更早发现"写作者其实重新扫了库""访谈其实是问卷""来源其实没覆盖"。

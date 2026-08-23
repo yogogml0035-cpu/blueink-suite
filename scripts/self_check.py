@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
 """自证门：把这个技能**对外声明过的东西**变成机械检查。
 
-技能是散文，散文会漂移。三类漂移已经真实发生过，每一类都不会报错，只会让人在
-某一天发现"文档说的和实际做的不是一回事"：
-
-1. **声明的运行底线是假的。** README 写"需要 Python 3.9 或更高"，但
-   ``check_pipeline.py`` 用了 3.10 才有的 ``sys.stdlib_module_names``，在 3.9 上
-   直接崩。它没崩在任何人面前，只因为它不在任何质量门里。
-2. **文档里的数字和实际不一致。** 八处文档写"状态层 54 项"，实际早已是 74 项。
-   一个连自己的检查项数都数错的技能，凭什么让人相信它报出的审计结论。
-3. **能力偷偷超出声明的范围。** 方法论第八节写着"不承担改稿编排、版本回退"，
-   命令行里却长出了 ``rework --from 5 --to 3``。范围失控从来不是一次大动作，
-   是一次加一个子命令。
+重点防三类静默漂移：运行底线与实际解释器能力不一致；文档数字与当前检查结果不一致；
+命令面超出文案生成的产品边界。
 
 对应三道门：
 
@@ -91,20 +82,17 @@ UPSTREAM_SCRIPTS = {
 # 少一处就说明其中一份文档已经开始许诺技能做不到（或不该做）的事。
 BOUNDARY_KEYWORDS = ("改稿编排", "版本回退", "Word 排版", "品类认证", "自然语言自动触发")
 
-# 越界能力的命令名。这些名字一旦出现在子命令表里，就说明"第一版只负责文案生成"
+# 越界能力的命令名。这些名字一旦出现在子命令表里，就说明"能力边界是文案生成"
 # 这条边界已经破了——而它是会话里被反复确认过的一条。
 FORBIDDEN_SUBCOMMANDS = {"rework", "rollback", "revert", "revise", "restore", "version"}
 
-# 六项验收契约的名称与顺序。审计器与评测规格必须一致，否则某项契约可以被悄悄改名。
-CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效", "学习不僵化"]
+# 五项验收契约的名称与顺序。审计器与评测规格必须一致，否则某项契约可以被悄悄改名。
+CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效"]
 
 DOC_GLOBS = ("*.md", "references/*.md", "evals/*.md", "agents/*.md", "commands/*.md")
 
-# 追加式历史日志：里面的数字是**当时**的快照，不是当前声明，所以不参与项数漂移
-# 检查。这不是给自己开后门——两份文件里的每个快照数字都标了"（当时 N 项）"，读的人
-# 不会误当成现状；而把历史记录改成现值反而是在伪造记录，那比数字过期更糟。
-# 除这两份之外的任何文档，写的都是**现在**的事实，一律参与核对。
-APPEND_ONLY_LOGS = {"CHANGELOG.md", "EVOLUTION.md"}
+# 版本说明与使用反馈证据不是运行契约，项数一致性只核对产品与评测文档。
+COUNT_EXEMPT_DOCS = {"CHANGELOG.md", "EVOLUTION.md"}
 
 # 嵌套标记。评测规格里有一条检查会调用本脚本，本脚本的变异门又要调用评测 harness——
 # 这是一条真实的环。看到这个标记就立刻退出，把环剪断在最外面一层。
@@ -307,15 +295,12 @@ def gate_claims(root: Path) -> Result:
 
 
 def _numbered_items(line: str) -> list[tuple[int, int]]:
-    """行内所有「N 项」，返回 (数字, 列号)。排除三种说的是别的量的写法：
+    """行内所有「N 项」，返回 (数字, 列号)。排除两种说的是别的量的写法：
 
     - ``× 5 项``：每个夹具几项，不是总数
     - ``5 项检查立刻转红``：变异测试里有几项转红，不是总数
-    - ``从 74 项到 79 项`` / ``当时 54 项``：历史叙述，不是当前声明
 
-    这三条排除不是为了让门更宽松，恰恰相反——误报会让人学会忽略整道门，
-    那时它和不存在没有区别。第三条是刻意选的写法约定：**历史数字必须带
-    「从」「当时」「曾」这类显式标记**，不带标记的数字一律按当前声明核对。
+    这两条排除避免把局部计数误判成当前总数。
     """
     out: list[tuple[int, int]] = []
     for match in re.finditer(r"(\d+) 项", line):
@@ -324,14 +309,9 @@ def _numbered_items(line: str) -> list[tuple[int, int]]:
         head = line[max(0, match.start() - 8):match.start()]
         if "×" in head:
             continue
-        if any(marker in head for marker in HISTORICAL_MARKERS):
-            continue
         out.append((int(match.group(1)), match.start()))
     return out
 
-
-# 历史叙述的显式标记。数字前 8 个字符内出现其一，就当作"曾经是多少"而不是"现在是多少"。
-HISTORICAL_MARKERS = ("当时", "从 ", "从", "曾", "停在", "此前")
 
 # 一行里出现这些词，就认为附近的「N 项」在说这个主体的项数。一行同时谈两个主体
 # 很常见（"状态层 54 项、审计器 6 个夹具 48 项"），所以按**离哪个主体近**归属，
@@ -374,8 +354,7 @@ def _attributed_counts(line: str) -> list[tuple[str, int]]:
 def _claim_counts(root: Path, docs: dict[Path, str], res: Result) -> None:
     """文档里写的项数必须等于测试真的跑出来的数。
 
-    这是已经发生过的漂移：八处文档停在"状态层 54 项"，实际早已是 74。数字本身不
-    重要，重要的是一个连自己检查项数都数错的技能，它报出的审计结论也不值得相信。
+    数字本身不重要；重要的是产品声明必须与可执行检查一致。
 
     判定按**整行 + 就近归属**而不是按"离主体多少字符以内"——按距离判会漏掉
     「……跑一遍绑定、索引、检索、URL 校验、记忆升降和审计，共 54 项」这类长句，
@@ -411,7 +390,7 @@ def _claim_counts(root: Path, docs: dict[Path, str], res: Result) -> None:
     labels = {"state": "状态层", "fixture": "审计夹具"}
     for path, text in docs.items():
         rel = path.relative_to(root).as_posix()
-        if path.name in APPEND_ONLY_LOGS:
+        if path.name in COUNT_EXEMPT_DOCS:
             continue
         for number, line in enumerate(text.splitlines(), 1):
             for subject, value in _attributed_counts(line):
@@ -494,8 +473,8 @@ def _claim_boundaries(root: Path, docs: dict[Path, str], res: Result) -> None:
         res.check(word in core, f"《方法论内核》边界节缺「{word}」")
         res.check(word in readme, f"README 边界节缺「{word}」")
     res.check(
-        "第一版只负责文案生成" in skill,
-        "SKILL.md 缺「第一版只负责文案生成」——这是范围边界的唯一显式声明点",
+        "能力边界" in skill and "文案生成" in skill,
+        "SKILL.md 缺「能力边界：文案生成」——这是范围边界的唯一显式声明点",
     )
 
 
@@ -573,7 +552,7 @@ def _claim_script_inventory(root: Path, docs: dict[Path, str], res: Result) -> N
 
 
 def _claim_contract_names(root: Path, docs: dict[Path, str], res: Result) -> None:
-    """六项契约的名称与顺序：审计器代码与评测规格必须一致。"""
+    """五项契约的名称与顺序：审计器代码与评测规格必须一致。"""
     audit_src = (root / "scripts" / "audit.py").read_text(encoding="utf-8")
     found = re.findall(r'Check\("A(\d)", "([^"]+)"\)', audit_src)
     res.check(

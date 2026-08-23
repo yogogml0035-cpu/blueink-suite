@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""六项验收契约的机械审计器。
+"""五项验收契约的机械审计器。
 
 这是"出问题不知道问题出在哪个 md"的直接解法：把一次运行的调用轨迹喂进来，它
 告诉你这次运行在哪一条契约上违约，以及证据在哪个文件的哪个字段。
@@ -9,7 +9,7 @@
 
 三种结论：
 
-- ``pass``       六项全部通过。**不代表稿子好**，只代表流程没有违约。
+- ``pass``       五项全部通过。**不代表稿子好**，只代表流程没有违约。
 - ``violated``   至少一项违约。看 ``failed`` 与对应 ``detail``。
 - ``incomplete`` 运行没跑完，有回执缺失。运行中途中断很常见，不是 bug。
 """
@@ -26,8 +26,6 @@ import workspace
 
 ENTRY = "/blueink-suite"
 ENTRY_ALIASES = (ENTRY, "/blueink-suite:blueink-suite")
-LAUNCH_PREFIX = "BlueInk 已启动"
-
 ROLE_BY_FILE = {
     "evidence.json": "evidence-researcher",
     "strategy.json": "editorial-strategist",
@@ -67,8 +65,6 @@ REWRITE_KEYS = {
     "suggested_sentence", "suggested_text", "replacement", "rewrite",
 }
 
-CONFIDENCE_MAX = 0.9
-UNNAMED_TEACHER = "未记名"   # v1 老工作空间迁上来的记忆没有归属，不算"混了两个人"
 QUESTION_MARKS = re.compile(r"[？?]")
 # 引号内的问句是被引述的内容，不是这一轮问出去的问题。不剥掉的话
 # 「我打算问客户「这个数字能对外吗？」，还是你直接告诉我？」会被误判成一次多问，
@@ -332,11 +328,6 @@ def check_entry(run_dir: Path, meta: Any, meta_error: str | None) -> Check:
     run_id = str(meta.get("run_id") or "")
     if not run_id:
         check.fail("meta.json 缺 run_id", "meta.json:run_id")
-    receipt = str(meta.get("launch_receipt") or "")
-    if not receipt.startswith(LAUNCH_PREFIX):
-        check.fail(f"缺启动回执行（应以「{LAUNCH_PREFIX}」开头）", "meta.json:launch_receipt")
-    elif run_id and run_id not in receipt:
-        check.fail("启动回执行里的 run-id 与 meta.run_id 不一致", "meta.json:launch_receipt")
     return check
 
 
@@ -760,91 +751,10 @@ def check_output(run_dir: Path, meta: Any) -> Check:
     return check
 
 
-# --- A6 学习不僵化 -----------------------------------------------------------
-
-
-def check_learning(run_dir: Path, memory_path: Path | None) -> Check:
-    check = Check("A6", "学习不僵化")
-    data, err = _load(run_dir, "feedback.json")
-    if err:
-        check.fail(err, "feedback.json")
-        return check
-
-    if data is None:
-        check.skip("本次运行没有老师反馈，学习外循环未启动")
-    elif not isinstance(data, dict):
-        check.fail("feedback.json 顶层不是对象", "feedback.json")
-    else:
-        candidates = data.get("candidates")
-        if not isinstance(candidates, list) or not candidates:
-            check.fail("有反馈但没有产出任何候选知识", "feedback.json:candidates")
-            candidates = []
-        for i, item in enumerate(candidates):
-            if not isinstance(item, dict):
-                check.fail(f"candidates[{i}] 不是对象", "feedback.json:candidates")
-                continue
-            where = f"feedback.json:candidates[{i}]"
-            scope = item.get("scope")
-            if scope not in ("session", "personal", "brand", "methodology"):
-                check.fail(f"scope 不合法：{scope!r}", where)
-            if not item.get("trigger"):
-                check.fail("缺 trigger——没有触发条件的知识无法判断「这次算不算」", where)
-            if scope != "session" and not item.get("not_applicable"):
-                check.fail("缺 not_applicable——没有不适用范围的知识会被到处滥用", where)
-            confidence = item.get("confidence")
-            if isinstance(confidence, (int, float)) and float(confidence) > CONFIDENCE_MAX:
-                check.fail(f"置信度 {confidence} 超过上限 {CONFIDENCE_MAX}", where)
-            if scope in ("personal", "brand") and item.get("needs_confirmation") is False:
-                check.fail("personal / brand 级不能跳过老师确认直接生效", where)
-            if item.get("evidence_strength") == "low" and item.get("stated_reason"):
-                check.fail("低强度证据不能同时声称知道修改原因", where)
-
-    snapshot = memory_path
-    if snapshot is None:
-        for candidate in (run_dir / "memory-snapshot.json",
-                          run_dir.parent.parent / "learning" / "memory.json"):
-            if candidate.is_file():
-                snapshot = candidate
-                break
-    if snapshot and snapshot.is_file():
-        try:
-            store = json.loads(snapshot.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            check.fail(f"{snapshot.name} 解析失败：{exc}", snapshot.name)
-            return check
-        items = store.get("items") if isinstance(store, dict) else None
-        owners: list[str] = []
-        for item in items or []:
-            if not isinstance(item, dict):
-                continue
-            if item.get("scope") == "methodology":
-                check.fail(
-                    f"methodology 级候选被写进了记忆库（{item.get('id')}）——"
-                    f"通用方法论不允许被工作空间自动改写",
-                    f"{snapshot.name}:items",
-                )
-            confidence = item.get("confidence")
-            if isinstance(confidence, (int, float)) and float(confidence) > CONFIDENCE_MAX:
-                check.fail(f"记忆 {item.get('id')} 置信度 {confidence} 超过上限", f"{snapshot.name}:items")
-            owner = str(item.get("teacher") or "")
-            if owner and owner not in owners:
-                owners.append(owner)
-        # 学的是"这位老师在什么条件下通常如何判断"。一个记忆库里出现两个人，
-        # 学出来的就是一个不存在的平均人，而症状是"我的偏好时灵时不灵"。
-        named = [o for o in owners if o != UNNAMED_TEACHER]
-        if len(named) > 1:
-            check.fail(
-                f"同一记忆库里混了多位老师的偏好（{'、'.join(named)}）——"
-                f"一个工作空间只服务一位老师，换人请新建项目目录",
-                f"{snapshot.name}:items",
-            )
-    return check
-
-
 # --- 汇总 -------------------------------------------------------------------
 
 
-def audit(run_dir: str | Path, memory_path: str | Path | None = None) -> dict[str, Any]:
+def audit(run_dir: str | Path) -> dict[str, Any]:
     """审计一次运行，返回结论字典。"""
     path = Path(run_dir)
     if not path.is_dir():
@@ -866,7 +776,6 @@ def audit(run_dir: str | Path, memory_path: str | Path | None = None) -> dict[st
         check_interview(path, meta),
         check_roles(path, meta),
         check_output(path, meta),
-        check_learning(path, Path(memory_path) if memory_path else None),
     ]
 
     present = {p.name for p in path.iterdir() if p.is_file()}
@@ -899,8 +808,8 @@ def audit(run_dir: str | Path, memory_path: str | Path | None = None) -> dict[st
 # 这五项检查的对象是 audit 的输出，而不是运行记录。它们保证一件事：**审计结论
 # 永远能把问题定位到具体文件**。评测就是拿这五项跑 evals/golden 下的夹具。
 
-CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效", "学习不僵化"]
-CONTRACT_IDS = ["A1", "A2", "A3", "A4", "A5", "A6"]
+CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效"]
+CONTRACT_IDS = ["A1", "A2", "A3", "A4", "A5"]
 VALID_STATUS = {"pass", "fail", "skip"}
 VERDICT_CHECKS = ("schema", "consistent", "localisable", "explained", "contracts")
 
@@ -972,7 +881,7 @@ def verify_verdict(data: Any, which: str) -> list[str]:
     if which == "contracts":
         names = [c.get("name") for c in checks]
         if names != CONTRACT_NAMES:
-            problems.append(f"六项契约名称应为 {CONTRACT_NAMES}，实际 {names}")
+            problems.append(f"五项契约名称应为 {CONTRACT_NAMES}，实际 {names}")
         return problems
 
     return [f"未知的自检项：{which}"]

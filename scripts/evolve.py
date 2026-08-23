@@ -21,8 +21,7 @@ Steps (default mode) — 与下面 `steps` 列表逐项对应：
   5. security_scan       安全扫描：越界执行、外发、凭据、对源库的写操作
   6. run_evals --rollout 审计器夹具 + 基线全等比对
 
-任一步失败都会把原始证据追加到 EVOLUTION.md。前三步刻意排在最前：它们守的边界
-破掉之后没人会立刻发现，而且跑起来最快。
+前三步排在最前：它们守的边界失效时不会自然报错，而且执行成本最低。
 
 `--correct` is a different kind of input, and the most valuable one this loop
 takes. Steps 1 and 2 catch what a machine can check: dates, reachability, output
@@ -179,12 +178,10 @@ def main(argv: list[str] | None = None) -> int:
         # 先跑最便宜也最容易抓到真问题的一步：状态层回归。绑定拦截、指令产物隔离、
         # URL 白名单、置信度规则破掉之后没人会立刻发现，所以它排在最前面。
         ("state", [sys.executable, "scripts/test_state.py"]),
-        # 自证门紧跟其后。它守的是"声明与实际是否一致"这一类**不会报错**的漂移：
-        # 声明的 Python 底线在 3.9 上其实跑不起来、文档里的检查项数早已过期、
-        # 子命令悄悄长出了声明过不做的能力。这三类都曾真实发生。
+        # 自证门紧跟其后，检查 Python 底线、文档项数与子命令边界。
         ("self", [sys.executable, "scripts/self_check.py"]),
-        # check_pipeline 曾经不在任何门里，于是它自己在 3.9 上崩了很久也没人知道。
-        # 一个不被执行的检查器等于不存在——这就是它现在被列进来的全部理由。
+        # 管线检查属于发布门，必须和状态层与自证门一起执行。
+        # 一个不被执行的检查器等于不存在。
         ("pipeline", [sys.executable, "scripts/check_pipeline.py", str(root)]),
         ("validate", [sys.executable, "scripts/validate.py", str(root)]),
         ("security", [sys.executable, "scripts/security_scan.py", str(root)]),
@@ -201,13 +198,11 @@ def main(argv: list[str] | None = None) -> int:
             failures.append((name, proc.returncode))
 
     if failures:
-        print("\nevolve: FAILED — raw evidence recorded in EVOLUTION.md")
+        print("\nevolve: FAILED")
         for name, rc in failures:
             print(f"  - {name} (exit {rc})")
         print(
-            "next: fix the findings (or hand EVOLUTION.md back to "
-            "/agent-skill-creator to regenerate), then re-run scripts/evolve.py "
-            "until clean"
+            "next: fix the findings, then re-run scripts/evolve.py until clean"
         )
         return 1
 

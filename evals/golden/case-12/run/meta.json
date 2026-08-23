@@ -5,7 +5,6 @@
   "mode": "生成",
   "brand": "理想汽车",
   "brand_key": "lixiang",
-  "teacher": "Hsikey",
   "kb_root": "/kb/理想汽车",
   "bound": true,
   "task_attachments": [
@@ -27,6 +26,5 @@
   "evidence_boundary": "attachments",
   "stage": 0,
   "stage_name": "运行开启",
-  "closed_at": null,
-  "launch_receipt": "BlueInk 已启动 · run-id: 20260823-130000-lixiang · 品牌: 理想汽车 · 老师: Hsikey · 模式: 生成"
+  "closed_at": null
 }
