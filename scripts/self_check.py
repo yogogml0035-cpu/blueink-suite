@@ -72,14 +72,20 @@ NEWER_BUILTINS: dict[str, tuple[int, int]] = {
 }
 
 # 取自 agent-skill-creator 的外来件，保持英文原样以便与上游重新同步。
-# README 里那份清单必须与这里一致，--claims 双向核对：多一个未登记的外来件，
-# 等于有人悄悄引入了一份不由本技能维护的代码。
 UPSTREAM_SCRIPTS = {
     "run_evals.py", "evolve.py", "check_pipeline.py",
 }
 
-# 方法论第八节声明的边界。每一条都必须同时出现在《方法论内核》与 README 的边界节，
-# 少一处就说明其中一份文档已经开始许诺技能做不到（或不该做）的事。
+# 自研脚本白名单。README 只负责安装；复杂度边界由这里直接与 scripts/ 双向核对。
+OWN_SCRIPTS = {
+    "audit.py", "blueink.py", "index_kb.py", "memory.py", "miniyaml.py",
+    "official.py", "retrieve.py", "run_pipeline.py", "run_record.py",
+    "security_scan.py", "self_check.py", "test_state.py", "validate.py",
+    "workspace.py",
+}
+
+# 方法论第八节声明的边界。每一条都必须同时出现在《方法论内核》与设计说明中，
+# 少一处就说明其中一份维护文档已经开始许诺技能做不到（或不该做）的事。
 BOUNDARY_KEYWORDS = ("改稿编排", "版本回退", "Word 排版", "品类认证", "自然语言自动触发")
 
 # 越界能力的命令名。这些名字一旦出现在子命令表里，就说明"能力边界是文案生成"
@@ -464,14 +470,17 @@ def _claim_subcommands(root: Path, docs: dict[Path, str], res: Result) -> None:
 
 
 def _claim_boundaries(root: Path, docs: dict[Path, str], res: Result) -> None:
-    """边界清单必须同时出现在《方法论内核》与 README，一处不缺。"""
+    """边界清单必须同时出现在《方法论内核》与设计说明，一处不缺。"""
     core = docs.get(root / "references" / "methodology-core.md", "")
-    readme = docs.get(root / "README.md", "")
+    design = docs.get(root / "DESIGN_NOTES.md", "")
     skill = docs.get(root / "SKILL.md", "")
-    res.check(bool(core and readme and skill), "读不到 methodology-core.md / README.md / SKILL.md")
+    res.check(
+        bool(core and design and skill),
+        "读不到 methodology-core.md / DESIGN_NOTES.md / SKILL.md",
+    )
     for word in BOUNDARY_KEYWORDS:
         res.check(word in core, f"《方法论内核》边界节缺「{word}」")
-        res.check(word in readme, f"README 边界节缺「{word}」")
+        res.check(word in design, f"DESIGN_NOTES.md 边界节缺「{word}」")
     res.check(
         "能力边界" in skill and "文案生成" in skill,
         "SKILL.md 缺「能力边界：文案生成」——这是范围边界的唯一显式声明点",
@@ -525,30 +534,19 @@ def _claim_retention(root: Path, docs: dict[Path, str], res: Result) -> None:
     )
 
 
-def _claim_script_inventory(root: Path, docs: dict[Path, str], res: Result) -> None:
+def _claim_script_inventory(root: Path, _docs: dict[Path, str], res: Result) -> None:
     """脚本清单双向核对：没有未登记的脚本，也没有登记了却不存在的脚本。
 
     这道检查同时是**规模控制**的机械化。复杂度失控不是一次大改动，是一次加一个
-    脚本；每个新脚本都必须在 README 目录树或外来件清单里露面，才加得进来。
+    脚本；每个新脚本都必须进入自研或外来件白名单，才加得进来。
     """
-    readme = docs.get(root / "README.md", "")
     actual = {p.name for p in script_files(root)}
+    registered = OWN_SCRIPTS | UPSTREAM_SCRIPTS
     res.check(
-        UPSTREAM_SCRIPTS <= actual,
-        f"外来件清单里有不存在的脚本：{sorted(UPSTREAM_SCRIPTS - actual)}",
+        actual == registered,
+        f"脚本登记不一致：未登记 {sorted(actual - registered)}，"
+        f"登记但不存在 {sorted(registered - actual)}",
     )
-    listed_upstream = {
-        name for name in re.findall(r"`([a-z_]+\.py)`", readme)
-    }
-    res.check(
-        UPSTREAM_SCRIPTS <= listed_upstream,
-        f"README 的外来件清单缺：{sorted(UPSTREAM_SCRIPTS - listed_upstream)}",
-    )
-    for name in sorted(actual - UPSTREAM_SCRIPTS):
-        res.check(
-            name in readme,
-            f"scripts/{name} 没有出现在 README 目录树里——未登记的脚本就是无人维护的脚本",
-        )
 
 
 def _claim_contract_names(root: Path, docs: dict[Path, str], res: Result) -> None:
