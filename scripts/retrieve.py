@@ -19,7 +19,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 import index_kb
@@ -150,8 +152,24 @@ def search(
     start=None,
 ) -> dict[str, Any]:
     """在索引里检索候选证据切片。"""
+    ws = workspace.load(start)
+    current_root = workspace.kb_root(start)
     index = index_kb.load_index(start)
     files = index.get("files") or []
+    if files:
+        index_root = Path(str(index.get("kb_root") or "")).expanduser().resolve()
+        mismatches: list[str] = []
+        if os.path.normcase(str(index_root)) != os.path.normcase(str(current_root)):
+            mismatches.append(f"知识库根 {index_root} != {current_root}")
+        if str(index.get("brand") or "") != str(ws.get("brand") or ""):
+            mismatches.append(f"品牌 {index.get('brand')} != {ws.get('brand')}")
+        if str(index.get("teacher") or "") != str(ws.get("teacher") or ""):
+            mismatches.append(f"老师 {index.get('teacher') or '未记名'} != {ws.get('teacher')}")
+        if mismatches:
+            raise workspace.WorkspaceError(
+                "当前索引不属于这个工作空间：" + "；".join(mismatches)
+                + "。请运行 index --full 重建，旧索引不会参与检索。"
+            )
     if not files:
         return {
             "brand": index.get("brand"),

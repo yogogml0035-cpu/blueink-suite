@@ -25,6 +25,7 @@ import run_record
 import workspace
 
 ENTRY = "/blueink-suite"
+ENTRY_ALIASES = (ENTRY, "/blueink-suite:blueink-suite")
 LAUNCH_PREFIX = "BlueInk 已启动"
 
 ROLE_BY_FILE = {
@@ -323,8 +324,11 @@ def check_entry(run_dir: Path, meta: Any, meta_error: str | None) -> Check:
     if not isinstance(meta, dict):
         check.fail("缺 meta.json——没有运行记录说明技能没被真正执行", "meta.json")
         return check
-    if meta.get("started_via") != ENTRY:
-        check.fail(f"started_via 不是 {ENTRY}（{meta.get('started_via')!r}）", "meta.json:started_via")
+    if meta.get("started_via") not in ENTRY_ALIASES:
+        check.fail(
+            f"started_via 不是受支持的显式入口 {ENTRY_ALIASES}（{meta.get('started_via')!r}）",
+            "meta.json:started_via",
+        )
     run_id = str(meta.get("run_id") or "")
     if not run_id:
         check.fail("meta.json 缺 run_id", "meta.json:run_id")

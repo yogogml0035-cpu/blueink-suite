@@ -26,7 +26,9 @@ instance: {a | b}                       # 仅策略师与写作者的双实例�
 brand: {品牌名}
 kb_root: {绑定的知识库绝对路径}
 skill_root: {技能根目录绝对路径}
-cli: {python3 <skill_root>/scripts/blueink.py --project <项目根绝对路径>}
+project_root: {当前项目根绝对路径}
+python: {当前平台已验证可用的 Python 3.9+ 命令：macOS 通常是 python3；Windows 通常是 py -3}
+cli: {用当前 shell 正确引用 python、skill_root 与 project_root 后得到的可直接执行命令}
 evidence_boundary: {attachments | kb}    # 取证角色必给
 attachments:                             # 老师本次显式提供的文件，已登记
   - {绝对路径}
@@ -44,7 +46,7 @@ expect: {…/runs/<run_id>/<回执文件>.json}
 
 ## 五条必须遵守的传递纪律
 
-1. **`skill_root`、`kb_root`、`cli`、`expect` 都给绝对路径。** 子智能体的工作目录不保证与主智能体一致，相对路径会读不到角色契约、跑不了 CLI、写不到预期位置。不给 `cli`，取证角色只能自己去猜索引文件在哪。
+1. **`skill_root`、`project_root`、`kb_root`、`cli`、`expect` 都按当前电脑生成。** 路径必须是当前平台的绝对路径；`cli` 必须已用当前 shell 试跑过，不能把另一台电脑的路径或 `python3` 假定复制过来。子智能体的工作目录不保证与主智能体一致。
 2. **整份任务单不超过 20 行，`ask` 不超过 3 行。** 超出的部分几乎总是主智能体把自己的结论提前写了进去。
 3. **不预置结论。** `ask` 只说要解决什么问题。给编辑策略师的任务单里出现"建议以战略定力为主线"这类句子，独立判断就已经结束了——它会去论证你的结论，而你需要的是一个有可能反对你的判断。
 4. **`context` 只给最小集。** 不要把整轮访谈记录倒给子智能体。
@@ -57,7 +59,7 @@ expect: {…/runs/<run_id>/<回执文件>.json}
 ## 一个填好的例子
 
 ```text
-先读取并严格遵守 /Users/xxx/.claude/skills/blueink-suite/agents/editorial-strategist.md，
+先读取并严格遵守 <当前技能根绝对路径>/agents/editorial-strategist.md，
 把它当作你的完整角色定义。读完后执行下面的任务单，不要执行任务单之外的任何动作。
 
 【任务单】
@@ -66,9 +68,11 @@ task_id: T2
 role: editorial-strategist
 instance: a
 brand: 理想汽车
-kb_root: /Users/xxx/Documents/理想汽车知识库
-skill_root: /Users/xxx/.claude/skills/blueink-suite
-cli: python3 /Users/xxx/.claude/skills/blueink-suite/scripts/blueink.py --project /Users/xxx/项目
+kb_root: <当前电脑上的理想汽车知识库绝对路径>
+skill_root: <Claude Code 当前插件根绝对路径>
+project_root: <当前项目根绝对路径>
+python: <当前平台已验证可用的 Python 3.9+ 命令>
+cli: <当前 shell 可直接执行的 blueink.py 绝对命令，显式带 --project>
 ask: |
   为「i8 上市后首月交付」写一篇面向行业媒体的观点供稿。
   判断本稿必须完成什么传播任务，给出推荐主线、素材取舍与信息预算。
@@ -76,12 +80,12 @@ context:
   已确认: 读者为行业媒体记者；期望效果是让记者理解平台能力而非单看销量
   待定: 良品率具体数值能否披露，老师尚未答复
 inputs:
-  - /Users/xxx/项目/.blueink/runs/20260822-143512-lixiang/evidence.json
+  - <当前项目根绝对路径>/.blueink/runs/20260822-143512-lixiang/evidence.json
 constraints:
   - 不补 evidence.json 里没有的事实
   - 不产出完整正文
   - 只在两条主线都被同一批事实支撑时才报备选
-expect: /Users/xxx/项目/.blueink/runs/20260822-143512-lixiang/strategy.json
+expect: <当前项目根绝对路径>/.blueink/runs/20260822-143512-lixiang/strategy.json
 ```
 
 注意这个例子里 `ask` **没有**说"建议以平台能力为主线"。它只给了任务和读者，主线是策略师要自己判断的东西——那正是启动这个角色的全部理由。

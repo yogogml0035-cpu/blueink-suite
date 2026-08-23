@@ -42,16 +42,16 @@
 
 | 角色 | `subagent_type` | 工具白名单 |
 |---|---|---|
-| 证据研究员 | `blueink-evidence-researcher` | Read, Grep, Glob, Bash, WebFetch, WebSearch |
-| 编辑策略师 | `blueink-editorial-strategist` | Read, Write |
-| 专业写作者 | `blueink-professional-writer` | Read, Write |
-| 来源核验员 | `blueink-source-verifier` | Read, Write |
-| 编辑反方 | `blueink-editorial-adversary` | Read, Write |
-| 反馈归因员 | `blueink-feedback-attributor` | Read, Write |
+| 证据研究员 | `blueink-suite:evidence-researcher` | Read, Grep, Glob, Bash, PowerShell, WebFetch, WebSearch |
+| 编辑策略师 | `blueink-suite:editorial-strategist` | Read, Write |
+| 专业写作者 | `blueink-suite:professional-writer` | Read, Write |
+| 来源核验员 | `blueink-suite:source-verifier` | Read, Write |
+| 编辑反方 | `blueink-suite:editorial-adversary` | Read, Write |
+| 反馈归因员 | `blueink-suite:feedback-attributor` | Read, Write |
 
 **为什么这是默认而不是可选。** 写作者、策略师、核验员、反方、归因员都**没有检索工具**，这是设计的一部分：写作阶段重新翻库等于在成稿时偷偷换了一次素材选择，核验员有搜索能力就会在发现某句话没依据时顺手找一个来源把它圆上。这些边界只有在原生注册时才由工具层强制执行。走 `general-purpose` 时它们全都拿到全套工具，边界退化成自律，只能靠审计 A4 事后发现——发现得到，但那时稿子已经写完了。
 
-安装时 `./install.sh` 默认把六个角色注册到 `~/.claude/agents/`（插件形态由 `agents/` 目录自动注册）。
+六个角色随 Claude Code 插件的根级 `agents/` 自动注册。直装脚本复制的是完整插件，不再向全局 agents 目录写第二份角色文件；否则版本更新或多份安装会留下同名旧角色。
 
 任务单直接作为 prompt 传给子智能体。**它是一份委托，不是一份答案。**
 
@@ -62,25 +62,27 @@ task_id: T1
 role: evidence-researcher
 brand: 理想汽车
 teacher: 张老师
-kb_root: /Users/xxx/理想汽车知识库
-skill_root: /Users/xxx/.claude/skills/blueink-suite
-cli: python3 /Users/xxx/.claude/skills/blueink-suite/scripts/blueink.py --project /Users/xxx/项目
+kb_root: <当前电脑上的理想汽车知识库绝对路径>
+skill_root: <Claude Code 当前插件根绝对路径>
+project_root: <当前项目根绝对路径>
+python: <当前平台已验证可用的 Python 3.9+ 命令>
+cli: <当前 shell 可直接执行的 blueink.py 绝对命令，显式带 --project>
 evidence_boundary: attachments
 attachments:
-  - /Users/xxx/附件/【指引】理想汽车2026年第一季度财报.md
-  - /Users/xxx/附件/【新闻稿】理想汽车公布2026年第一季度财报.md
+  - <当前电脑上的附件绝对路径>/【指引】理想汽车2026年第一季度财报.md
+  - <当前电脑上的附件绝对路径>/【新闻稿】理想汽车公布2026年第一季度财报.md
 ask: 本次要为「2026 年一季度财报」写一篇 1500 字面向媒体的观点稿，需要可用事实、时间线与冲突
 constraints:
   - 先只用 attachments 成稿所需的事实；这两份就是本次证据边界
   - 只有出现会阻止成稿的高影响缺口时，才用 cli retrieve 在 kb_root 内最小范围补，并写进 gaps
   - 联网前先跑 cli official check-url，退出码非 0 就标成缺口
-expect: /Users/xxx/项目/.blueink/runs/20260822-143512-lixiang/evidence.json
+expect: <当前项目根绝对路径>/.blueink/runs/20260822-143512-lixiang/evidence.json
 ```
 
 **五条硬纪律。**
 
 - **`skill_root` 是每个角色的必填项，不只是取证角色。** 角色需要读 references（策略师要读《品类任务边界》，写作者要读自己的契约）——没有 `skill_root`，它只能在项目目录里逐个猜路径。缺了它，一个策略师实例可能连试七个不存在的路径才放弃。**子智能体不知道技能装在哪，除非你告诉它。**
-- **`cli` 必须给出可直接执行的绝对命令。** 子智能体的工作目录不保证与主智能体一致。不给 `cli`，取证角色只能自己去猜 `.blueink/index/index.json` 在哪，而那会浪费掉一整轮。同理 `expect` 必须是绝对路径，回执落地位置由主智能体决定，不由子智能体自选。
+- **`cli` 必须在当前电脑、当前 shell 里试跑过。** macOS 通常使用 `python3`，Windows 通常优先 `py -3`、再试 `python`；不能把作者机器的命令复制给另一位老师。子智能体的工作目录不保证与主智能体一致，所以 `skill_root`、`project_root`、`expect` 都必须使用当前平台解析出的绝对路径。
 - **任务单不超过 20 行，`ask` 不超过 3 行。** 超出的部分几乎总是主智能体把自己的结论提前写了进去。
 - **不预置结论。** `ask` 只说要解决什么问题，不说答案是什么。给编辑策略师的任务单里出现"建议以战略定力为主线"这类句子，独立判断就已经结束了——它会去论证你的结论，而你需要的是一个有可能反对你的判断。
 - **`context` 只给必要的最小集。** 不要把整轮访谈记录倒给子智能体。尤其是来源核验员和编辑反方，**绝不能把 `strategy.json` 的理由传给它们**。
@@ -104,7 +106,7 @@ expect: /Users/xxx/项目/.blueink/runs/20260822-143512-lixiang/evidence.json
 
 每份回执都要写 `read_paths`——**包括正常情况下应为空数组的角色**。空数组是一个断言（"我没有打开任何文件"），缺这个字段则什么都没断言，审计无法区分"没读"和"读了没说"。
 
-**`read_paths` 里的每条路径必须是绝对路径，或是相对 `kb_root` 的路径——不许缩写。** 把 `/Users/…/知识库/【整理后】…` 写成 `【整理后】…` 会掐掉前缀：读的文件是对的，但**写下来的那条路径没人能解析**，于是这条来源事后无法复核——而“来源可复核”就是核验员存在的全部理由。审计会把它报成“声称读过但文件不存在”，并指出路径不完整。缩写只允许出现在交付给老师的来源清单里（那里的读者是人），不许出现在回执里。
+**`read_paths` 里的每条路径必须是当前平台的绝对路径，或是相对 `kb_root` 的路径——不许缩写。** 把 `<知识库绝对路径>/【整理后】…` 写成 `【整理后】…` 会掐掉前缀：读的文件是对的，但**写下来的那条路径没人能解析**，于是这条来源事后无法复核。审计会把它报成“声称读过但文件不存在”，并指出路径不完整。缩写只允许出现在交付给老师的来源清单里，不许出现在回执里。
 
 **回执必须能落得下来。** 一个取证角色可以反复宣布"信息足够、准备写 evidence.json"，然后连续数分钟不产出任何文件，最后一份回执都没有。写审计材料本身成了主要耗时，那比不记账更糟——同时花掉了时间，又没换来可定位性。
 
@@ -256,11 +258,11 @@ diff、需要知道哪一段是上一轮哪个判断的产物，而这三样本�
 **它们也不永久保留。** 运行目录里躺着访谈原文、素材路径和交付正文——它是可定位性的载体，同时也是一份会无限增长的客户内容留存。留存期是一条显式策略而不是"永远不删"：默认保留 90 天，且无论多旧至少保留最近 20 次运行。次数这一条是必要的，一个几个月才写一稿的老师纯按时间清会被清空，而那正是他定位问题时唯一的依据。
 
 ```bash
-python3 scripts/blueink.py open --mode 生成          # 品牌取自工作空间，不用也不能在这里传
-python3 scripts/blueink.py close --run <run_id>
-python3 scripts/blueink.py audit --input .blueink/runs/<run_id> --output /tmp/verdict.json
-python3 scripts/blueink.py purge                     # 试运行：打印将删除哪些旧运行
-python3 scripts/blueink.py purge --apply             # 真的删
+$BLUEINK open --mode 生成          # 品牌取自工作空间，不用也不能在这里传
+$BLUEINK close --run <run_id>
+$BLUEINK audit --input "<当前项目根>/.blueink/runs/<run_id>" --output "<当前电脑临时目录>/verdict.json"
+$BLUEINK purge                     # 试运行：打印将删除哪些旧运行
+$BLUEINK purge --apply             # 真的删
 ```
 
 `purge` 默认试运行。删除范围只到项目内 `.blueink/runs/<run_id>/` 这一层派生物，**永不触及源知识库**——源库只读是本技能最硬的一条承诺，清理留存不是它的例外。

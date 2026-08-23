@@ -25,6 +25,7 @@ from typing import Any
 import workspace
 
 ENTRY = "/blueink-suite"
+ENTRY_ALIASES = (ENTRY, "/blueink-suite:blueink-suite")
 MODES = ("生成", "绑定", "学习", "定位")
 
 # 本次证据边界。``attachments`` 表示老师说了"以附件为准"，先只用附件成稿；
@@ -148,6 +149,7 @@ def open_run(
     attachments: list[str] | None = None,
     evidence_boundary: str | None = None,
     brand: str | None = None,
+    started_via: str = ENTRY,
 ) -> dict[str, Any]:
     """开一次运行，返回 meta（含 run_id 与要回显的启动回执行）。
 
@@ -167,6 +169,8 @@ def open_run(
     """
     if mode not in MODES:
         raise ValueError(f"mode 必须是 {MODES} 之一，收到 {mode!r}")
+    if started_via not in ENTRY_ALIASES:
+        raise ValueError(f"started_via 必须是 {ENTRY_ALIASES} 之一，收到 {started_via!r}")
     if evidence_boundary is not None and evidence_boundary not in EVIDENCE_BOUNDARIES:
         raise ValueError(
             f"evidence_boundary 必须是 {EVIDENCE_BOUNDARIES} 之一，收到 {evidence_boundary!r}"
@@ -210,8 +214,8 @@ def open_run(
                     f"没有的话新建一个目录再 bind（加 --create 可以顺带建出知识库骨架）。\n"
                     f"  3. 只想参考几份指定文件、不用知识库："
                     f"在一个没绑定的目录里 open --attach <文件绝对路径>。\n"
-                    f"确实要在这个项目里改绑，用 bind --force —— 它会作废现有索引，"
-                    f"并让已有记忆的归属不再准确。"
+                    f"换品牌或换老师必须新建项目目录；bind --force 只用于同身份迁移"
+                    f"知识库路径或确认集合层启发式误判。"
                 )
         brand_name, brand_key = str(ws["brand"]), str(ws["brand_key"])
         teacher = str(ws.get("teacher") or "未记名")
@@ -242,7 +246,7 @@ def open_run(
     scope = f"品牌: {brand_name}" if bound else f"品牌: {brand_name} · 无知识库·以附件为准"
     meta = {
         "run_id": run_id,
-        "started_via": ENTRY,
+        "started_via": started_via,
         "started_at": (when or datetime.now()).isoformat(timespec="seconds"),
         "mode": mode,
         "brand": brand_name,

@@ -77,7 +77,7 @@
 **每次联网前必须过这道机械闸，退出码非 0 就不访问：**
 
 ```bash
-python3 scripts/blueink.py official check-url --url "<地址>"
+$BLUEINK official check-url --url "<地址>"
 ```
 
 判定规则只有一条：主机名等于白名单域名，或是它的子域。`lixiang.com.evil.cn`、`https://lixiang.com@别的主机/`、`https://某站/https://lixiang.com` 肉眼都像官网，而"看起来像"不构成来源。**搜索结果自称官网也不能跳过这一步。** 完整拒绝清单见《工作空间与索引》第八节。
@@ -113,7 +113,7 @@ python3 scripts/blueink.py official check-url --url "<地址>"
 文件体积不等于上下文体积。索引可以有十几兆，一次任务只加载相关切片。
 
 ```bash
-python3 scripts/blueink.py retrieve --run <run_id> --category "媒体观点供稿" \
+$BLUEINK retrieve --run <run_id> --category "媒体观点供稿" \
         --query "交付 产能 平台" --track fact --limit 12
 ```
 

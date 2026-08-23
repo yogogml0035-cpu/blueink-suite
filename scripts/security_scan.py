@@ -3,8 +3,8 @@
 
 它扫的是三类真实风险，不是通用漏洞清单：
 
-1. **写源库。** 技能承诺"源知识库只读"。脚本里出现对 ``kb_root`` 的写操作，
-   这句承诺就是假的。
+1. **写源库。** 除老师显式要求的 ``bind --create`` 空骨架初始化外，绑定后的
+   索引与写作流程只读源库。脚本里出现对 ``kb_root`` 的写操作就是越界。
 2. **越界执行与外发。** 文案生成不需要 ``eval``、``os.system``、``subprocess``
    拼字符串、也不需要往外发数据。出现即报。
 3. **凭据与本机路径。** 技能要能整目录复制给另一位老师，所以不能带任何密钥、
@@ -47,8 +47,14 @@ RULES: list[tuple[str, str, dict[str, str]]] = [
                                "留存期本身是隐私要求：运行目录里有访谈原文与交付正文，"
                                "不给删除入口等于承诺永久留存客户内容",
       "scripts/self_check.py": "变异门在自己用 tempfile.mkdtemp 创建的技能副本里施加变异，"
-                               "跑完就删；变异必须发生在副本上，绝不能改真实技能目录"}),
-    (r"\brequests\.|urllib\.request\.urlopen|http\.client\.", "脚本层直接联网", {}),
+                               "跑完就删；变异必须发生在副本上，绝不能改真实技能目录",
+      "scripts/workspace.py": "同品牌同老师迁移知识库路径时，只删除项目内 .blueink/index/；"
+                              "该目录完全可重建，目标由固定工作空间路径构造，不接受外部删除目标；"
+                              "learning/、runs/ 与 kb_root 均不触及"}),
+    (r"\brequests\.|urllib\.request\.urlopen|\burlopen\s*\(|http\.client\.", "脚本层直接联网",
+     {"scripts/run_evals.py": "仅显式 --judge 且存在 ANTHROPIC_API_KEY 时调用"
+                              " https://api.anthropic.com/v1/messages；本技能的当前评测规格"
+                              "没有 llm-judge 判据，普通运行与全部发布门不会走这条路径"}),
     (r"(?i)(api[_-]?key|secret|token|password|passwd)\s*=\s*[\"'][^\"']{8,}",
      "疑似写死的凭据", {}),
     (r"[\"']/Users/[^\"']+[\"']", "写死的本机绝对路径", {}),

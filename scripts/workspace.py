@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ import official
 BLUEINK_DIR = ".blueink"
 WORKSPACE_FILE = "workspace.yaml"
 SCHEMA_VERSION = 2
+HOME_DIR = Path.home().resolve()
 
 # 常见文本格式：绑定时用来判断这个目录里到底有没有可用语料
 TEXT_EXTS = {".md", ".markdown", ".txt", ".text", ".json", ".yaml", ".yml", ".csv"}
@@ -73,6 +75,10 @@ def find_project_root(start: str | os.PathLike[str] | None = None) -> Path | Non
     """
     cur = Path(start or Path.cwd()).resolve()
     for candidate in [cur, *cur.parents]:
+        # 家目录不是项目边界。旧版本若误在家目录 bind，不能让其下所有项目静默
+        # 继承同一品牌与老师；只有用户真的站在家目录本身时才允许读旧状态做迁移。
+        if candidate == HOME_DIR and cur != HOME_DIR:
+            continue
         if (candidate / BLUEINK_DIR).is_dir():
             return candidate
     return None
@@ -297,8 +303,9 @@ def create_kb_skeleton(root: Path, brand: str) -> list[str]:
     if not readme.is_file():
         readme.write_text(
             f"# {brand} 知识库\n\n"
-            f"这个目录是 {brand} 的单品牌语料库。BlueInk 只读它，永不改写、"
-            f"重命名或移动这里的任何文件。\n\n"
+            f"这个目录是 {brand} 的单品牌语料库。当前 README 与空目录由你显式要求的 "
+            f"bind --create 创建；绑定完成后的索引与写作流程只读语料，不改写、"
+            f"重命名或移动这里的文件。\n\n"
             "## 放什么\n\n"
             + "".join(
                 f"- `{folder}/`：{label}\n" for label, folder in DEFAULT_CORPUS_LAYOUT.items()
@@ -341,11 +348,87 @@ def bind(
         (写入的配置, 需要提示给用户的告警列表)
 
     Raises:
-        WorkspaceError: 目录不存在（且未给 ``create``）、目录里没有可读文本、绑到了
-            品牌集合层、官方域名格式无效，或已绑定其它品牌／老师／知识库而未加 ``force``。
+        WorkspaceError: 品牌或老师为空、目录不存在（且未给 ``create``）、目录里没有
+            可读文本、绑到了品牌集合层、官方域名格式无效、试图改品牌／老师，或同身份
+            迁移知识库路径但未加 ``force``。
     """
     warnings: list[str] = []
+    brand = str(brand).strip()
+    teacher = str(teacher).strip()
+    if not brand:
+        raise WorkspaceError("品牌不能为空。")
+    if not teacher:
+        raise WorkspaceError(
+            "文案老师不能为空（--teacher）。条件化记忆按老师隔离；"
+            "允许未记名，就无法兑现‘一个工作空间一位老师’。"
+        )
+
+    base = Path(start or Path.cwd()).resolve()
+    if base == HOME_DIR:
+        raise WorkspaceError(
+            "不能把用户家目录绑定成 BlueInk 项目根；否则这台电脑上的下级项目会共享"
+            "同一品牌与老师。请新建一个具体项目目录后再 bind。"
+        )
+    target = base / BLUEINK_DIR / WORKSPACE_FILE
     root = Path(kb).expanduser()
+    candidate_root = root.resolve()
+    existing: dict[str, Any] | None = None
+    root_changed = False
+    identity_migrated = False
+    if target.is_file():
+        loaded = miniyaml.load_file(target)
+        if not isinstance(loaded, dict):
+            raise WorkspaceError(f"{target} 内容不是键值结构，无法安全改绑。")
+        existing = loaded
+
+        old_brand = str(existing.get("brand") or "").strip()
+        old_teacher = str(existing.get("teacher") or "").strip()
+        if old_brand and normalize_brand(old_brand) != normalize_brand(brand):
+            raise WorkspaceError(
+                f"当前项目绑定的是「{old_brand}」，不能改成「{brand}」。"
+                "换品牌请新建项目目录；--force 只用于同一品牌同一老师迁移知识库路径，"
+                "不绕过工作空间身份隔离。"
+            )
+        if old_teacher and old_teacher != teacher:
+            raise WorkspaceError(
+                f"当前项目属于文案老师「{old_teacher}」，不能改成「{teacher}」。"
+                "换老师请新建项目目录；--force 不绕过老师隔离。"
+            )
+        if not old_teacher and not force:
+            raise WorkspaceError(
+                "这是一个旧版未记名工作空间。补登记老师会改变记忆归属，"
+                "请确认后加 --force；已有未记名记忆仍需人工复核。"
+            )
+        if not old_teacher:
+            identity_migrated = True
+            warnings.append(
+                "旧版未记名工作空间已补登记老师；已有未记名记忆不会自动改归属，"
+                "请在使用前人工复核。"
+            )
+
+        old_root = Path(str(existing.get("kb_root") or "")).expanduser().resolve()
+        root_changed = os.path.normcase(str(old_root)) != os.path.normcase(str(candidate_root))
+        if root_changed and not force:
+            raise WorkspaceError(
+                f"知识库路径将由「{old_root}」改为「{candidate_root}」。"
+                "同一品牌同一老师换电脑或移动目录时加 --force；系统会清空可重建索引，"
+                "保留学习记忆与历史运行。"
+            )
+
+        if brand_key is None:
+            brand_key = str(existing.get("brand_key") or "") or None
+        if official_urls is None:
+            official_urls = [
+                str(item.get("url"))
+                for item in (existing.get("official_sources") or [])
+                if isinstance(item, dict) and item.get("url")
+            ]
+        if corpus_layout is None:
+            prior_layout = existing.get("corpus_layout")
+            corpus_layout = dict(prior_layout) if isinstance(prior_layout, dict) else None
+        if not notes:
+            notes = str(existing.get("notes") or "")
+
     just_created: list[str] = []
     if not root.is_dir():
         if not create:
@@ -355,7 +438,7 @@ def bind(
             )
         if root.exists():
             raise WorkspaceError(f"这个路径已存在但不是目录，无法作为知识库：{root}")
-        just_created = create_kb_skeleton(root, brand.strip())
+        just_created = create_kb_skeleton(root, brand)
     root = root.resolve()
 
     text_files = _count_text_files(root)
@@ -392,12 +475,6 @@ def bind(
             + "。跨品牌污染检查会因此失效，请自行确认目录单一。"
         )
 
-    if not str(teacher).strip():
-        warnings.append(
-            "没有登记文案老师（--teacher）。条件化记忆会标成「未记名」，"
-            "这个项目换人使用时无法区分谁的偏好。建议重新绑定并写上负责人。"
-        )
-
     # 官方域名在写入时就校验一次，而不是等检索时才发现格式不对
     normalized: list[dict[str, str]] = []
     for url in official_urls or []:
@@ -413,7 +490,6 @@ def bind(
             continue
         normalized.append({"name": host, "url": f"https://{host}"})
 
-    base = Path(start or Path.cwd()).resolve()
     # 绑定目标就是 --project／当前目录本身，**不向上继承父目录的工作空间**。
     # 向上写会把"在子目录里绑定"变成"悄悄改了父项目的绑定"。
     outer = find_project_root(base.parent) if base.parent != base else None
@@ -422,35 +498,11 @@ def bind(
             f"上层目录 {outer} 已有一个工作空间。本次绑定只作用于 {base}，"
             f"两者互不影响；如果你本意是改那一个，请在那个目录下执行 bind。"
         )
-    target = base / BLUEINK_DIR / WORKSPACE_FILE
-    if target.is_file() and not force:
-        existing = miniyaml.load_file(target)
-        if isinstance(existing, dict):
-            # 品牌、老师、知识库三者任一改变都要显式确认：改绑会让现有索引与
-            # 记忆的归属失真，而失真是看不出来的。
-            changes = [
-                (label, old, new)
-                for label, old, new in (
-                    ("品牌", existing.get("brand"), brand.strip()),
-                    ("文案老师", existing.get("teacher"), str(teacher).strip()),
-                    ("知识库", existing.get("kb_root"), str(root)),
-                )
-                if old not in (None, "", new)
-            ]
-            if changes:
-                detail = "；".join(f"{label} 由「{old}」改为「{new}」" for label, old, new in changes)
-                raise WorkspaceError(
-                    f"当前项目已绑定，本次会改变：{detail}。"
-                    f"一个工作空间只服务一个品牌和一位老师——换品牌或换人请新建项目目录。"
-                    f"确实要在这个项目里改绑请加 --force —— 这会作废现有索引，"
-                    f"并让已有记忆的归属不再准确。"
-                )
-
     data: dict[str, Any] = {
         "version": SCHEMA_VERSION,
-        "brand": brand.strip(),
+        "brand": brand,
         "brand_key": (brand_key or derive_brand_key(brand)).strip(),
-        "teacher": str(teacher).strip(),
+        "teacher": teacher,
         "kb_root": str(root),
         "bound_at": date.today().isoformat(),
         "official_sources": normalized,
@@ -460,6 +512,17 @@ def bind(
     }
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    ignore = target.parent / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n!.gitignore\n", encoding="utf-8")
+    if root_changed or identity_migrated:
+        stale_index = target.parent / "index"
+        if stale_index.exists():
+            shutil.rmtree(stale_index)
+        reason = "知识库路径已迁移" if root_changed else "工作空间已从未记名迁移为记名"
+        warnings.append(
+            f"{reason}：已清空可重建索引；学习记忆与历史运行仍保留。请立即运行 index。"
+        )
     for sub in ("index", "learning", "runs"):
         (base / BLUEINK_DIR / sub).mkdir(parents=True, exist_ok=True)
     miniyaml.dump_file(target, data)

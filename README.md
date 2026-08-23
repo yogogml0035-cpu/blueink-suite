@@ -17,11 +17,11 @@
 | 问题 | 这套系统怎么处理 |
 |---|---|
 | 全量加载语料撑爆上下文 | 技能本体不含任何品牌语料。分层按需加载，一次任务只加载十几个文件量级的相关切片 |
-| 多品牌语料交叉感染 | 一个工作空间只绑定一个品牌，检索根只有一个。**物理隔离，不靠提示词** |
-| 知识库太杂、没人愿意整理 | 源库只读、旁路增量索引。低置信度文件保留多个候选标签，不要求先做一次知识工程 |
+| 多品牌语料交叉感染 | 一个工作空间只绑定一个品牌，索引只扫描一个检索根。前提是该根本身只含这个品牌，且没有用 `--force` 绕过集合层提示 |
+| 知识库太杂、没人愿意整理 | `bind --create` 可显式创建空骨架；绑定后的索引与写作流程只读源库。低置信度文件保留多个候选标签 |
 | 固定结构限制创作 | 品类只规定必须完成的传播任务和边界，不规定段落顺序 |
 | 自检只查禁词，缺来源标注 | 必须回答"这句话依据什么、观点从哪来、舍弃了什么"。长审查报告取消，改为极短核对卡 |
-| 换品牌或换领导要重来 | 要更新的只有品牌工作空间里的证据。方法论不含品牌结论，一行不动 |
+| 换品牌或换老师 | 方法论不变，但必须新建项目目录，不能把旧工作空间的索引、运行与偏好记忆改名后继续用 |
 | 出问题不知道在哪 | 六个责任型角色各留任务单与回执，`audit` 直接指出违约在哪个文件的哪个字段 |
 | 同一项目换人用，偏好互相污染 | 工作空间同时锁品牌与锁人，每条记忆记归属。换人换项目，审计会发现混人 |
 | 知识库里的固定模板被当经验用 | 带 `SKILL.md` 的目录整棵子树默认不参与检索——按目录判定，模板不在入口文件里 |
@@ -32,66 +32,45 @@
 
 底线不是一句口头承诺：`scripts/self_check.py --compat` 会静态扫描全部脚本里高于 3.9 的 stdlib API 与语法，并在本机存在 3.9 解释器时用它真跑一遍状态层与管线检查。这道门是补出来的——`check_pipeline.py` 曾经用了 3.10 才有的 `sys.stdlib_module_names`，在 3.9 上直接崩，而它当时不在任何质量门里，所以崩了很久也没人知道。**一个不被执行的检查器等于不存在。**
 
-### Claude Code
+### Claude Code marketplace（推荐，macOS 与 Windows 相同）
 
 ```bash
-git clone <本仓库> blueink-suite && cd blueink-suite
-./install.sh              # 装到 ~/.claude/skills/ 并注册六个原生子智能体
-./install.sh --no-agents   # 只装技能（不推荐，见下）
+/plugin marketplace add https://github.com/yogogml0035-cpu/blueink-suite
+/plugin install blueink-suite@blueink-suite
 ```
 
-Windows 用 `.\install.ps1`，参数等价。
+插件根级 `SKILL.md` 是当前 Claude Code 官方支持的单 Skill 布局；根级 `agents/` 会随插件自动注册六个子智能体。安装后如果当前会话提示需要重载，运行 `/reload-plugins`，然后确认 `/blueink-suite` 出现在命令列表中。若已有其它插件占用同名裸命令，使用规范化入口 `/blueink-suite:blueink-suite`，并让 `open --started-via` 如实记录它；不要误调另一个同名命令。
 
-**注册子智能体是默认行为，不是可选项。** 角色契约里的工具白名单只有在原生注册时才被工具层强制执行：写作者、策略师、核验员、反方、归因员都**没有检索工具**，这是设计的一部分——写作阶段重新翻库等于在成稿时偷偷换了一次素材选择；核验员有搜索能力就会在发现某句话没依据时顺手找一个来源把它圆上。走 `--no-agents` 时这些边界退化成提示词自律，越权只能靠 `audit` 事后从 `read_paths` 发现，而那时稿子已经写完了。
+**子智能体不是可选附件。** 写作者、策略师、核验员、反方、归因员都没有检索工具；证据研究员在 macOS 可用 Bash、在 Windows 可用 PowerShell。角色契约只保留 Claude Code 当前支持的 frontmatter 字段。
 
-### 作为 Claude Code 插件
+### 本地源码直装（备用）
 
-`.claude-plugin/plugin.json` 与 `marketplace.json` 已随包提供：
+先克隆仓库，再按系统执行一条：
 
-```bash
-/plugin marketplace add <本仓库路径或 URL>
-/plugin install blueink-suite
+```text
+git clone https://github.com/yogogml0035-cpu/blueink-suite
+cd blueink-suite
+./install.sh          # macOS
+.\install.ps1         # Windows PowerShell
 ```
 
-**这条路径未在本机验证过。** 插件形态下技能的发现规则与直接放进 `~/.claude/skills/` 不同（插件通常期望 `skills/<name>/SKILL.md` 这样的子目录布局，而本包把 `SKILL.md` 放在根）。已验证可用的是上面的 `install.sh` 与手工复制两条路径；插件装完请先确认 `/blueink-suite` 能被命中，不行就退回手工复制。
-
-### 其他工具
-
-| 工具 | 路径 |
-|---|---|
-| Codex CLI | `~/.codex/skills/blueink-suite`（`./install.sh --codex`） |
-| 通用 SKILL.md 路径 | `~/.agents/skills/blueink-suite`（`./install.sh --to ~/.agents/skills`） |
-| 只读 AGENTS.md 的工具 | 直接读仓库里的 `AGENTS.md`（导航型，指向 `SKILL.md` 与 references） |
+两个脚本都只安装到 Claude Code 的个人 skills 目录，并复制完整插件；不会再把角色另存到全局 agents 目录。安装脚本支持 `--force` / `--dry-run`（PowerShell 为 `-Force` / `-DryRun`）。本包不再声明或维护其它宿主。
 
 ## 第一次使用
 
-绑定只做一次。在**你要写稿的项目目录**里执行：
+新开 Claude Code，在**你要写稿的项目目录**里显式启动：
 
-```bash
-SK=~/.claude/skills/blueink-suite
-
-python3 $SK/scripts/blueink.py bind \
-        --brand "理想汽车" \
-        --teacher "你的名字" \
-        --kb "/path/to/理想汽车知识库" \
-        --official "https://www.lixiang.com"
-
-python3 $SK/scripts/blueink.py index
-python3 $SK/scripts/blueink.py doctor
+```
+/blueink-suite 帮我为理想汽车写一篇面向行业媒体的观点供稿
 ```
 
-`--teacher` 决定条件化记忆的归属。留空不会失败，但记忆会标成"未记名"——同一项目换人使用时无法区分谁的偏好，而症状是"我的偏好时灵时不灵"。
+项目未绑定时，Skill 会逐轮问出品牌、文案老师和当前电脑上的知识库目录，再执行 `bind`、`index` 与 `doctor`。`--teacher` 是新绑定的必填项；换老师必须换项目目录。
 
-**这些你不用自己敲。** 项目还没绑定时，`/blueink-suite` 会在访谈里一次问一件地问出品牌、你的名字和知识库目录，然后替你写好配置。上面这几行是给想手工完成的人看的。
+Claude Code 插件形态下不要猜安装缓存地址。Skill 使用宿主提供的 `${CLAUDE_PLUGIN_ROOT}` 与 `${CLAUDE_PROJECT_DIR}`，并在任务单里写入当前机器解析出的绝对路径。macOS 通常使用 `python3`；Windows 通常优先 `py -3`，再尝试 `python`。
 
 ### 还没有知识库目录
 
-加 `--create`，它会按标准语料布局建出来：
-
-```bash
-python3 $SK/scripts/blueink.py bind --brand "理想汽车" --teacher "你的名字" \
-        --kb "/path/to/理想汽车知识库" --create
-```
+让 `/blueink-suite` 在绑定时使用 `--create`，它会在你确认的当前电脑路径下建立：
 
 ```
 理想汽车知识库/
@@ -107,7 +86,7 @@ python3 $SK/scripts/blueink.py bind --brand "理想汽车" --teacher "你的名�
 
 **只有一件事必须做：这个目录里只放这一个品牌的材料。**
 
-然后在该目录下用显式命令启动：
+然后在写稿项目目录下用显式命令启动：
 
 ```
 /blueink-suite 帮我写一篇面向行业媒体的观点供稿，素材我贴在下面
@@ -121,8 +100,9 @@ BlueInk 已启动 · run-id: <run_id> · 品牌: 理想汽车 · 老师: 张老�
 
 ### 这一稿的品牌和绑定的不是一个
 
-```bash
-python3 $SK/scripts/blueink.py check-brand --brand "东风奕派"
+```text
+<当前平台 Python 3.9+ 命令> "<当前插件根>/scripts/blueink.py" \
+  --project "<当前项目根>" check-brand --brand "东风奕派"
 ```
 
 不匹配时技能不会自己选边，会把三条出路交给你：本次品牌名写错了、换到那个品牌的项目目录去、或本次只参考指定文件不用知识库。`open --brand` 会在开启运行时再挡一次，被拒绝的运行不落盘。
@@ -133,10 +113,11 @@ python3 $SK/scripts/blueink.py check-brand --brand "东风奕派"
 
 不需要知识库，也不需要绑定：
 
-```bash
-python3 $SK/scripts/blueink.py open --mode 生成 --brand "理想汽车" \
-        --attach "/path/to/【指引】xxx.md" \
-        --attach "/path/to/【新闻稿】xxx.md"
+```text
+<当前平台 Python 3.9+ 命令> "<当前插件根>/scripts/blueink.py" \
+  --project "<当前项目根>" open --mode 生成 --brand "理想汽车" \
+  --attach "<当前电脑附件绝对路径>/【指引】xxx.md" \
+  --attach "<当前电脑附件绝对路径>/【新闻稿】xxx.md"
 ```
 
 启动回执会写明"无知识库·以附件为准"，让你一眼看到本次没有品牌库参与。缺到无法成稿时技能会向你要，**不会自己去找**——没有绑定根就没有可自主检索的范围，任何目录都是越界。
@@ -145,10 +126,11 @@ python3 $SK/scripts/blueink.py open --mode 生成 --brand "理想汽车" \
 
 老师本次明确提供的文件就是本次任务的证据，**不受绑定知识库根限制**——绑定根约束的是系统自己去找什么，不是老师授权它读什么。登记一下：
 
-```bash
-python3 $SK/scripts/blueink.py open --mode 生成 --brand "理想汽车" \
-        --attach "/path/to/【指引】xxx.md" \
-        --attach "/path/to/【新闻稿】xxx.md"
+```text
+<当前平台 Python 3.9+ 命令> "<当前插件根>/scripts/blueink.py" \
+  --project "<当前项目根>" open --mode 生成 --brand "理想汽车" \
+  --attach "<当前电脑附件绝对路径>/【指引】xxx.md" \
+  --attach "<当前电脑附件绝对路径>/【新闻稿】xxx.md"
 ```
 
 有附件时 `evidence_boundary` 默认为 `attachments`：**先只用附件成稿**，只有出现会阻止成稿的高影响缺口才最小范围查库，并把缺口写出来。
@@ -159,11 +141,11 @@ python3 $SK/scripts/blueink.py open --mode 生成 --brand "理想汽车" \
 
 现代汽车在源库里是两个并列目录。**必须绑到具体品牌那一层：**
 
-```bash
+```text
 # 对
---kb "/path/to/现代汽车/现代N品牌"
+--kb "<当前电脑知识库根>/现代汽车/现代N品牌"
 # 错：bind 会直接拦住，不只是告警
---kb "/path/to/现代汽车"
+--kb "<当前电脑知识库根>/现代汽车"
 ```
 
 判定是通用结构启发式（子目录没有语料布局特征词、而是并列的若干名字），不是硬编码品牌名表——第五个品牌来了也照样生效。确认某个目录确实是单一品牌时用 `--force`，此时会明确提示跨品牌污染检查将失效。
@@ -175,7 +157,7 @@ python3 $SK/scripts/blueink.py open --mode 生成 --brand "理想汽车" \
 ```
 blueink-suite/
 ├── SKILL.md                          方法论主入口：核心命题、五条原则、决策主干、运行底线、按需路由
-├── AGENTS.md                         跨工具导航型伴生文件（不重复操作细节）
+├── .claude-plugin/                   Claude Code 插件与 marketplace 清单
 ├── agents/                           六个责任型子智能体的角色契约
 │   ├── evidence-researcher.md          证据研究员
 │   ├── editorial-strategist.md         编辑策略师
@@ -193,7 +175,6 @@ blueink-suite/
 │   ├── category-boundaries.md          《品类任务边界》十一类交付物必须完成什么传播任务
 │   ├── workspace-and-index.md          《工作空间与索引》绑定、旁路索引、官方来源白名单
 │   └── troubleshooting.md              《问题定位手册》三步定位、审计结论读法、反直觉事实、留存策略
-├── commands/blueink-suite.md         插件形态下的唯一入口（关闭模型自动调用）
 ├── scripts/
 │   ├── blueink.py                      唯一命令入口：确定性状态与记账层
 │   ├── run_pipeline.py                 blueink.py 的别名（技能打包规范的入口约定，只转发）
@@ -207,7 +188,7 @@ blueink-suite/
 │   ├── miniyaml.py                     YAML 子集读写（避免第三方依赖）
 │   ├── validate.py                     规范自检 + 复审周期
 │   ├── security_scan.py                安全扫描
-│   ├── test_state.py                   状态层回归，158 项检查
+│   ├── test_state.py                   状态层回归，171 项检查
 │   ├── self_check.py                   自证门：版本底线 / 声明一致性 / 变异承重
 │   ├── run_evals.py                    评测 harness（外来件，见下）
 │   └── evolve.py                       自维护：全部质量门 + 反馈捕获（外来件）
@@ -235,20 +216,22 @@ blueink-suite/
 python3 scripts/self_check.py --claims    # 末尾会打印四类构成的文件数与行数
 ```
 
-分成四类看，是因为"总行数"这个数字会把性质完全不同的东西混在一起：方法论与文档（读的人是文案老师和主智能体）、自研脚本（确定性状态层，本技能自己维护）、上游同步件（可与 `agent-skill-creator` 重新同步，不由本技能演进）、审计夹具（十二种失败与合规形态的运行记录，是验证证据而不是产品代码）。同一道 `--claims` 门还会挡住脚本蔓延：**任何一个新脚本必须在上面这棵目录树或外来件清单里露面，否则直接判失败**——复杂度失控从来不是一次大改动，是一次加一个没人登记的脚本。
+分成四类看，是因为"总行数"这个数字会把性质完全不同的东西混在一起：方法论与文档（读的人是文案老师和主智能体）、自研脚本（确定性状态层，本技能自己维护）、上游同步件（可与 `agent-skill-creator` 重新同步，不由本技能演进）、审计夹具（十三种失败与合规形态的运行记录，是验证证据而不是产品代码）。同一道 `--claims` 门还会挡住脚本蔓延：**任何一个新脚本必须在上面这棵目录树或外来件清单里露面，否则直接判失败**——复杂度失控从来不是一次大改动，是一次加一个没人登记的脚本。
 
 ## 常用命令
 
+这些是运行／排查命令，不是老师的必经操作。下文 `$BLUEINK` 代表 Claude Code 已按当前电脑解析并试跑过的完整命令：Python 3.9+、当前插件根下的 `scripts/blueink.py`、以及 `--project <当前项目根>`。它不是让老师原样输入的 shell 变量。
+
 ```bash
-python3 scripts/blueink.py status                   # 看当前绑定
-python3 scripts/blueink.py doctor                   # 一条命令看清全部状态
-python3 scripts/blueink.py index                    # 增量更新索引
-python3 scripts/blueink.py retrieve --query "交付 产能" --track fact
-python3 scripts/blueink.py official check-url --url "<地址>"   # 联网前必过
-python3 scripts/blueink.py memory list --brand "理想汽车"
-python3 scripts/blueink.py open --mode 生成 --attach "<老师给的附件绝对路径>"
-python3 scripts/blueink.py audit --run <run_id>     # 六项契约审计
-python3 scripts/blueink.py purge                    # 清理旧运行记录（默认试运行）
+$BLUEINK status                   # 看当前绑定
+$BLUEINK doctor                   # 一条命令看清全部状态
+$BLUEINK index                    # 增量更新索引
+$BLUEINK retrieve --query "交付 产能" --track fact
+$BLUEINK official check-url --url "<地址>"   # 联网前必过
+$BLUEINK memory list --brand "理想汽车"
+$BLUEINK open --mode 生成 --attach "<老师给的附件绝对路径>"
+$BLUEINK audit --run <run_id>     # 六项契约审计
+$BLUEINK purge                    # 清理旧运行记录（默认试运行）
 ```
 
 `--track` 取 `fact` / `style` / `strategy`。**不加 `--track` 时三轨混排，容易把初稿当风格样本，不推荐。**
@@ -260,7 +243,7 @@ python3 scripts/blueink.py purge                    # 清理旧运行记录（�
 三步：看现象落到角色 → 读该角色回执判断是"判断错了"还是"没执行" → 跑审计器。
 
 ```bash
-python3 scripts/blueink.py audit --run <run_id> --output /tmp/verdict.json
+$BLUEINK audit --run <run_id> --output "<当前电脑临时目录>/verdict.json"
 ```
 
 结论只有三种：`pass`（流程没违约，**不代表稿子好**）、`violated`（看 `failed`）、`incomplete`（运行没跑完，很常见，不是 bug）。
@@ -292,12 +275,12 @@ python3 scripts/blueink.py audit --run <run_id> --output /tmp/verdict.json
 - **不做品类认证。** 登记在册的十一条品类（十个交付物 ＋ 活动物料这一容器类）是压力测试变量，不是验收边界。
 - **第一版只负责文案生成。** 不做 Word 排版、字体、配图、品牌文档模板，也不做改稿编排与版本回退。老师的修改意见只进学习外循环——要基于它再出一稿就正常发起下一次生成，不做"退到第几步"的路由。这条边界由 `self_check.py --claims` 机械守着：子命令表里出现 `rework` / `rollback` 这类名字直接判失败。
 - **运行记录不永久保留。** `.blueink/runs/` 里有访谈原文与交付正文，默认保留 90 天且至少保留最近 20 次运行，用 `purge` 清理。可定位性是有留存成本的，把留存期写出来比默认永久保存诚实。
-- **不承诺自然语言自动触发。** 只认显式 `/blueink-suite`——能被确认的行为比看起来更聪明的行为更有价值。
+- **不承诺自然语言自动触发。** 只认 Claude Code 显式入口：默认 `/blueink-suite`，同名冲突时使用规范化入口 `/blueink-suite:blueink-suite`。
 
 ## 评测与自检
 
 ```bash
-python3 scripts/test_state.py                             # 状态层回归，158 项
+python3 scripts/test_state.py                             # 状态层回归，171 项
 python3 scripts/self_check.py                             # 自证门（下面详述）
 python3 scripts/check_pipeline.py .                       # 管线接线与依赖声明
 python3 scripts/validate.py .                             # 规范自检
@@ -307,6 +290,8 @@ python3 scripts/evolve.py                                 # 一次跑完全部�
 ```
 
 评测**不判文案好不好**（那由文案老师判断），验的是三件事：六项契约审计器自身没有静默失败（13 个夹具刻画 13 种形态，含 2 个保留测试）；确定性状态层还守着它声称的边界（绑定拦截、指令产物隔离、URL 白名单、置信度规则）；**技能对外的声明与实际一致**。
+
+普通运行和当前发布门不调用模型 API。上游 `run_evals.py` 保留了可选 `--judge` 能力：只有显式使用且环境中存在 `ANTHROPIC_API_KEY` 时，才会访问 Anthropic Messages API；当前评测规格没有 `llm-judge` 判据，因此这条地址不在默认执行路径。
 
 ### 自证门：把声明变成机械检查
 
@@ -327,6 +312,8 @@ python3 scripts/self_check.py --mutation   # 变异承重：真的注入七个�
 | `confidence-cap` | 置信度上限放宽到 1.0 | `test_state.py` |
 | `url-whitelist` | 官方来源白名单退化成子串匹配 | `test_state.py` |
 | `audit-incomplete` | 审计器把「运行没跑完」判成「流程通过」 | `run_evals.py --rollout --include-holdout` |
+| `sufficiency-dimensions` | 访谈停止理由不再要求指名会改变稿件的维度 | `test_state.py` |
+| `duplicate-question` | 同一个问题重复追问却不再判违约 | `test_state.py` |
 
 前两条锁的是这个技能最实质的两条优势，而它们退化时**症状都是静默的**：按 size+mtime 判断复用的索引，在文件被同长度改写并恢复修改时间后会漏更新——文件确实变了，检索却永远拿不到新内容，且不报任何错；只隔离入口文件的做法会让技能包 `references/` 里的固定模板重新进入检索，于是"新闻稿必须先铺垫行业背景"这类固定模板接管本次判断。这两条只能靠变异门守。
 
@@ -337,6 +324,8 @@ python3 scripts/self_check.py --mutation   # 变异承重：真的注入七个�
 **明确没有被自动证明的：** 没有跑过真实的主／子智能体端到端文案任务。审计器守的是形式契约，"六个角色协作出来的稿子是否真的更好"必须安装后由文案老师盲评。完整清单见 `DESIGN_NOTES.md` 最后一节。
 
 ## 维护
+
+以下命令从仓库根运行；macOS 使用 `python3`，Windows PowerShell 将命令开头替换为已验证的 `py -3` 或 `python`。
 
 ```bash
 python3 scripts/evolve.py                          # 全部质量门：状态层 / 自证 / 管线 / 规范 / 安全 / 评测

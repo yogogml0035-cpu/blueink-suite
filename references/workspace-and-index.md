@@ -2,6 +2,8 @@
 
 首次绑定时读这里。本次品牌与知识库不匹配时读这里。需要理解索引字段、检索切片或官方来源白名单时读这里。
 
+下文用 `$BLUEINK` 代指当前电脑上已经解析并试跑过的 `blueink.py --project <当前项目根>` 命令，不是可跨平台原样复制的 shell 变量。macOS 通常使用 `python3`；Windows 通常优先 `py -3`，找不到再试 `python`。
+
 ## 一 · 首次运行：先确定证据从哪来
 
 三种情形，按这个顺序判断。**判断错了后面全错**，因为它决定所有检索的边界。
@@ -33,7 +35,7 @@ $BLUEINK status          # 退出码 1 = 未绑定
 3. 该品牌知识库目录在哪；
 4. 哪些官方公开来源可用（联网取证前才需要；不急着问）。
 
-第 4 项之外都是必需的。语料布局（初终稿、需求素材、反馈分别在哪）**不要问**——索引会自动判断，问了反而是在替它做本该自动完成的工作。
+第 4 项之外都是必需的；新绑定缺老师会直接拒绝。语料布局（初终稿、需求素材、反馈分别在哪）**不要问**——索引会自动判断，问了反而是在替它做本该自动完成的工作。
 
 ```bash
 $BLUEINK bind --brand "<品牌>" --teacher "<文案老师>" --kb "<知识库目录绝对路径>" \
@@ -88,7 +90,7 @@ $BLUEINK check-brand --brand "<本次品牌>"
 | 换项目 | 确实要写另一个品牌 | 到那个品牌的项目目录去执行；没有就新建一个目录再 `bind`（可加 `--create`） |
 | 本次不用知识库 | 只想参考几份指定文件 | 在一个未绑定的目录里 `open --attach` |
 
-**改绑不是第四条出路。** `bind --force` 会作废现有索引，并让已有记忆的归属不再准确——它是"这个项目从此换品牌"的操作，不是"这一稿换个库查"的操作。只有老师明确说这个项目要整体转到另一个品牌时才用。
+**改绑不是第四条出路。** `--force` 不能改品牌或老师；换品牌、换老师必须新建项目目录。它只在两类情况使用：确认一个被结构启发式误判的单品牌目录，或同品牌同老师换电脑／移动知识库路径。迁移路径会清空可重建索引并要求立刻重跑 `index`，学习记忆与历史运行保留。
 
 `open --brand` 会在开启运行时再挡一次，所以**品牌名一律传给它**。被拒绝的运行不会落盘，不会留下一条"品牌不对但看起来正常"的记录。
 
@@ -111,20 +113,19 @@ $BLUEINK check-brand --brand "<本次品牌>"
 
 三条纪律：
 
-- **源知识库只读。** 技能永不改写、重命名、移动 `kb_root` 下的任何文件。
-- **`.blueink/` 全部可删可重建。** 删掉只损失索引和记忆，不损失源库。索引可以重建；记忆不能，所以 `learning/` 值得单独备份。
+- **绑定后的索引与写作流程只读源知识库。** 唯一写入例外是老师显式要求的 `bind --create`：它只创建空目录骨架与说明文件，后续不改写、重命名或移动语料。
+- **`.blueink/index/` 可删可重建，`.blueink/learning/` 不可自动重建。** `runs/` 受留存策略清理；删除整个 `.blueink/` 会丢失绑定、记忆和运行记录。新建工作空间会写入 `.blueink/.gitignore`，默认不随项目仓库复制；迁移记忆应单独备份 `learning/`。
 - **一个工作空间只绑一个品牌和一位老师。** 要换品牌或换人，换项目。这是跨品牌与跨人隔离的唯一机制——不靠提示词。
 
 ## 三 · 本次附件的登记
 
 老师本次显式提供的文件是本次任务的证据，**不受绑定根限制**——绑定根约束的是系统自己去找什么，不是老师授权它读什么。但它必须登记，登记发生在开启运行的那一次：
 
-```bash
-BLUEINK="python3 <技能根目录绝对路径>/scripts/blueink.py --project <项目根绝对路径>"
-
-$BLUEINK open --mode 生成 \
-  --attach "/绝对/路径/【指引】xxx.md" \
-  --attach "/绝对/路径/【新闻稿】xxx.md"
+```text
+<当前平台 Python 3.9+ 命令> "<当前插件根>/scripts/blueink.py" \
+  --project "<当前项目根>" open --mode 生成 \
+  --attach "<当前电脑附件绝对路径>/【指引】xxx.md" \
+  --attach "<当前电脑附件绝对路径>/【新闻稿】xxx.md"
 ```
 
 写进 `meta.json` 的 `task_attachments`：每条含 `path`（解析后的绝对路径）、`sha256`、`bytes`、`brand`、`source: user`。同时写 `evidence_boundary`：**有附件时默认 `attachments`**，没有附件时是 `kb`。要显式覆盖用 `--evidence-boundary kb|attachments`。
@@ -146,39 +147,41 @@ version: 2
 brand: 理想汽车
 brand_key: lixiang
 teacher: 张老师
-kb_root: /Users/xxx/Documents/理想汽车知识库
+kb_root: <当前电脑上的理想汽车知识库绝对路径>
 bound_at: 2026-08-22
 official_sources:
   - name: lixiang.com
     url: https://lixiang.com
 corpus_layout:
-  原文资产: 02-原文资产
+  原文资产: 01-原文资产
+  需求素材: 02-需求素材
   初终稿对比: 03-初终稿对比
-  经验总结: 04-经验总结原稿
+  经验总结: 04-经验总结
   成品参考: 05-成品参考
 notes: ""
 ```
 
 - **`brand` 是写进稿子要认的品牌名，`brand_key` 是文件名和索引里用的短标识。** 前者用于跨品牌污染检查，后者用于路径与命名。
-- **`teacher` 决定记忆归属。** 留空时记忆标成"未记名"，`doctor` 会持续提示补上。
+- **`teacher` 决定记忆归属，并且新绑定必填。** 旧版未记名工作空间只能在人工确认后用 `--force` 补登记，已有未记名记忆仍需复核。
 - **`corpus_layout` 可以为空。** 空的时候索引按文件名和路径关键词自动判断证据类型。填了就优先按它判断，准确度更高。
 - **`official_sources` 是白名单，不是搜索建议。** 写入时统一归一化成主机名（见第六节）。
 - `notes` 用来记这个工作空间的特殊约定，比如"绑定到现代 N 品牌，不是现代中国"。
 
 ```bash
-python3 scripts/blueink.py bind --brand "理想汽车" --teacher "张老师" --kb "<目录>" \
+$BLUEINK bind --brand "理想汽车" --teacher "张老师" --kb "<目录>" \
         [--brand-key lixiang] [--official lixiang.com] [--notes "特殊约定"] [--force]
-python3 scripts/blueink.py status
+$BLUEINK status
 ```
 
-`bind` 会拒绝四种情况：
+`bind` 会拒绝这些情况：
 
 | 拒绝 | 为什么不只是告警 |
 |---|---|
 | 目录不存在 | 检索会永远返回空 |
 | 目录里一份可读文本都没有 | 同上 |
 | **绑到了品牌集合层** | 见下 |
-| **品牌、老师或知识库任一改变** | 改绑会让现有索引与记忆的归属失真，而失真是看不出来的 |
+| **品牌或老师改变** | 即使带 `--force` 也拒绝；换身份必须新建项目 |
+| **同身份知识库路径改变但未确认** | 换电脑或移动目录后需加 `--force`；随后旧索引会被清空并要求重建 |
 
 **品牌集合层是拦截，不是告警。** 判定方式是结构启发式：子目录里没有任何语料布局特征词（原文／初终／经验／成品／需求／反馈……）、而是并列的若干名字，就判为集合层。这条规则同时拦住两种情况：
 
@@ -199,9 +202,9 @@ python3 scripts/blueink.py status
 - 文件新增或修改时按内容哈希增量更新，不重新处理整个库。
 
 ```bash
-python3 scripts/blueink.py index            # 首次全量／之后按哈希增量
-python3 scripts/blueink.py index --full      # 忽略现有索引，全量重建
-python3 scripts/blueink.py index --limit 20   # 试跑预览，只扫前 20 个文件且不落盘
+$BLUEINK index            # 首次全量／之后按哈希增量
+$BLUEINK index --full      # 忽略现有索引，全量重建
+$BLUEINK index --limit 20   # 试跑预览，只扫前 20 个文件且不落盘
 ```
 
 `--limit` 是**预览**，不写索引。这一点必须记住：它如果落盘，一次 `--limit 5` 就会把 186 条索引截成 5 条，而输出里的"移除 181"会让人以为知识库真的少了文件。
@@ -269,7 +272,7 @@ python3 scripts/blueink.py index --limit 20   # 试跑预览，只扫前 20 个�
 ## 七 · 检索：返回切片清单，不返回全文
 
 ```bash
-python3 scripts/blueink.py retrieve --run <run_id> \
+$BLUEINK retrieve --run <run_id> \
         --query "交付 产能 平台" [--category "媒体观点供稿"] \
         [--track fact|style|strategy] [--limit 12] [--since 2026-01-01] \
         [--include-instruction-artifacts]
@@ -298,9 +301,9 @@ python3 scripts/blueink.py retrieve --run <run_id> \
 **每次联网前必须过这道闸，退出码非 0 就不访问：**
 
 ```bash
-python3 scripts/blueink.py official check-url --url "https://www.lixiang.com/news/xxx"
-python3 scripts/blueink.py official list
-python3 scripts/blueink.py official add --url "ir.lixiang.com"
+$BLUEINK official check-url --url "https://www.lixiang.com/news/xxx"
+$BLUEINK official list
+$BLUEINK official add --url "ir.lixiang.com"
 ```
 
 判定规则只有一条：**主机名等于白名单域名，或者是它的子域。** 实现只有一处（`scripts/official.py`），审计、检索和 Agent 契约都调用它，不各写一份。
@@ -330,11 +333,11 @@ python3 scripts/blueink.py official add --url "ir.lixiang.com"
 `doctor` 也会打印上次运行的**证据边界与已登记附件**。这是"老师给的文件到底被当成本次证据了吗"这个问题的唯一答案，而它只存在 `meta.json` 里——放进 `doctor` 是因为那才是老师会去看的那一条命令。声明了 `attachments` 却一份都没登记时会给告警：那说明 `open` 时漏了 `--attach`。
 
 ```bash
-python3 scripts/blueink.py doctor
+$BLUEINK doctor
 ```
 
 它检查并报告：**当前解析到的项目根是哪个目录**；是否已绑定；老师是否记名；官方白名单是否为空；`kb_root` 是否仍然存在且可读；索引是否新鲜（有多少文件变更未入索引、跳过了什么）；记忆库有多少条、多少条待确认、**是否混进了其他老师的记忆**；上次运行是哪个 `run_id`、走到了哪一步、有没有未闭合的运行。
 
-第一项最容易被忽略却最要紧。绑定是按目录向上查找 `.blueink/` 的，所以如果某次误在 `~` 下执行过 `bind`，家目录里所有项目都会解析到那一个工作空间。**`status` 与 `doctor` 的第一行都会打印项目根**，看到不对就换目录重新绑定。
+第一项最容易被忽略却最要紧。绑定会在项目目录内向上查找 `.blueink/`，但**不会让下级项目继承家目录的 `.blueink/`，也拒绝直接把家目录绑定成项目根**。`status` 与 `doctor` 的第一行都会打印最终解析到的项目根；看到不对先修正 `--project`，不要继续检索。
 
-**"检索返回空"最常见的原因是知识库路径失效或项目根解析错了，而不是没有相关内容。** 先跑 `doctor`，不要先怀疑索引质量。
+`retrieve` 会先确认知识库仍存在，并核对索引里的品牌、老师与根路径都属于当前工作空间；任何一项不一致都拒绝返回旧候选并要求 `index --full`。**"检索返回空"最常见的原因才是尚未建立索引或确实没有命中。** 先跑 `doctor`，不要先怀疑索引质量。

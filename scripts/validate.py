@@ -38,7 +38,18 @@ ROLES = (
 )
 
 # 写作者必须拿不到检索工具——写作阶段重新翻库会让"取舍问题"和"表达问题"永久混在一起
-RETRIEVAL_TOOLS = ("Grep", "Glob", "WebSearch", "WebFetch", "Bash")
+RETRIEVAL_TOOLS = ("Grep", "Glob", "WebSearch", "WebFetch", "Bash", "PowerShell")
+
+CLAUDE_SKILL_FIELDS = {
+    "name", "description", "when_to_use", "argument-hint", "arguments",
+    "disable-model-invocation", "user-invocable", "allowed-tools", "disallowed-tools",
+    "model", "effort", "context", "agent", "background", "hooks", "paths", "shell",
+    "metadata", "license", "compatibility",
+}
+CLAUDE_AGENT_FIELDS = {
+    "name", "description", "model", "effort", "maxTurns", "tools", "disallowedTools",
+    "skills", "memory", "background", "isolation",
+}
 
 
 def frontmatter(path: Path) -> tuple[dict[str, str], str]:
@@ -83,6 +94,9 @@ def check(root: Path) -> list[str]:
             )
         if not meta.get("description"):
             problems.append("SKILL.md 缺 description")
+        unknown = sorted(set(meta) - CLAUDE_SKILL_FIELDS)
+        if unknown:
+            problems.append(f"SKILL.md 含 Claude Code 未声明的 frontmatter 字段：{unknown}")
         if "/blueink " in body or "`/blueink`" in body.replace("`/blueink-suite`", ""):
             pass  # 正文里提到旧入口是为了说明不兼容，不算问题
         for name in CONTRACTS:
@@ -91,13 +105,16 @@ def check(root: Path) -> list[str]:
             ):
                 problems.append(f"六项验收契约里的「{name}」在文档中找不到")
 
-    command = root / "commands" / "blueink-suite.md"
-    if command.is_file():
-        meta, _ = frontmatter(command)
-        if meta.get("disable-model-invocation") != "true":
-            problems.append("commands/blueink-suite.md 缺 disable-model-invocation: true")
-    else:
-        problems.append("缺 commands/blueink-suite.md —— 插件形态下这是 /blueink-suite 的入口")
+    # Claude Code 当前支持插件根级单个 SKILL.md。再放一个同名 commands/ 入口会
+    # 形成两个 /blueink-suite 定义，不是“双保险”，而是解析顺序依赖。
+    if (root / "commands" / "blueink-suite.md").exists():
+        problems.append("commands/blueink-suite.md 与根级 SKILL.md 重名——只保留一个入口")
+
+    compatibility = frontmatter(skill)[0].get("compatibility", "") if skill else ""
+    if "Claude Code only" not in compatibility:
+        problems.append("SKILL.md compatibility 没有声明 Claude Code only")
+    if (root / "AGENTS.md").exists():
+        problems.append("仍有 AGENTS.md——当前包声明只适配 Claude Code，不再维护跨工具侧门")
 
     # --- 角色契约 ---
     agents = root / "agents"
@@ -125,6 +142,16 @@ def check(root: Path) -> list[str]:
             meta, _ = frontmatter(path)
             if not meta.get("description"):
                 problems.append(f"agents/{role}.md 缺 description")
+            if meta.get("name") != role:
+                problems.append(
+                    f"agents/{role}.md 的 name 应为 {role}，由插件命名空间生成"
+                    f" blueink-suite:{role}；当前是 {meta.get('name')}"
+                )
+            unknown = sorted(set(meta) - CLAUDE_AGENT_FIELDS)
+            if unknown:
+                problems.append(
+                    f"agents/{role}.md 含 Claude Code 未声明的 frontmatter 字段：{unknown}"
+                )
             if "tools" not in meta:
                 problems.append(
                     f"agents/{role}.md 缺 tools —— 没有工具白名单时角色边界只能靠自律"
@@ -170,8 +197,52 @@ def check(root: Path) -> list[str]:
 
     problems += review_due(root)
     problems += task_order_fields(root)
+    problems += workspace_template_matches(root)
+    problems += claude_only_distribution(root)
     problems += correction_target(root)
     problems += documented_flags(root)
+    return problems
+
+
+def workspace_template_matches(root: Path) -> list[str]:
+    """注释模板的语料布局必须与 ``bind --create`` 的真实骨架一致。"""
+    sys.path.insert(0, str(root / "scripts"))
+    try:
+        import miniyaml  # noqa: PLC0415
+        import workspace  # noqa: PLC0415
+        data = miniyaml.load_file(root / "assets" / "workspace.template.yaml")
+    except Exception as exc:  # noqa: BLE001
+        return [f"无法核对工作空间模板：{exc}"]
+    actual = data.get("corpus_layout") if isinstance(data, dict) else None
+    if actual != workspace.DEFAULT_CORPUS_LAYOUT:
+        return [
+            "assets/workspace.template.yaml 的 corpus_layout 与 bind --create 不一致："
+            f"模板 {actual!r}，代码 {workspace.DEFAULT_CORPUS_LAYOUT!r}"
+        ]
+    return []
+
+
+def claude_only_distribution(root: Path) -> list[str]:
+    """安装说明与脚本不得继续承诺其它宿主，也不得带作者机器路径。"""
+    problems: list[str] = []
+    active = [root / "README.md", root / "SKILL.md", *sorted((root / "references").glob("*.md")),
+              *sorted((root / "assets").glob("*.md"))]
+    joined = "\n".join(p.read_text(encoding="utf-8") for p in active if p.is_file())
+    for forbidden in ("/Users/", "/tmp/", "~/.codex/skills", "~/.agents/skills", "Codex CLI"):
+        if forbidden in joined:
+            problems.append(f"Claude Code 专用文档仍含平台／宿主特定地址：{forbidden}")
+    shell = (root / "install.sh").read_text(encoding="utf-8")
+    powershell = (root / "install.ps1").read_text(encoding="utf-8")
+    for forbidden in ("--codex", "--to", "AGENTS_ROOT"):
+        if forbidden in shell or forbidden in powershell:
+            problems.append(f"安装脚本仍含跨宿主分支：{forbidden}")
+    try:
+        market = json.loads((root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        problems.append(f"marketplace.json 无法解析：{exc}")
+    else:
+        if market.get("$schema"):
+            problems.append("marketplace.json 不应保留未经验证的 $schema 地址")
     return problems
 
 
@@ -245,7 +316,10 @@ def correction_target(root: Path) -> list[str]:
 # 任务单的必填字段。子智能体拿不到其中任何一个，就只能在项目目录里逐个猜路径——
 # 缺了它，一个策略师实例可能连试六个不存在的路径才放弃。字段写在两个文件里
 # （《编排协议》的示例和 assets 模板），两处发散时后写的那一份会静默失效。
-TASK_ORDER_FIELDS = ("run_id", "task_id", "role", "brand", "kb_root", "skill_root", "cli", "expect")
+TASK_ORDER_FIELDS = (
+    "run_id", "task_id", "role", "brand", "kb_root", "skill_root",
+    "project_root", "python", "cli", "expect",
+)
 
 
 def task_order_fields(root: Path) -> list[str]:

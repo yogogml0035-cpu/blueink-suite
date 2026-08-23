@@ -279,6 +279,7 @@ def cmd_open(args: argparse.Namespace) -> int:
         attachments=args.attach or [],
         evidence_boundary=args.evidence_boundary,
         brand=args.brand,
+        started_via=args.started_via,
     )
     lines = [meta["launch_receipt"],
              f"运行目录：{run_record.run_dir_for(meta['run_id'], args.project)}"]
@@ -608,14 +609,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("bind", help="绑定单品牌单老师工作空间")
     p.add_argument("--brand", required=True, help="品牌名，写进稿子要认的那个名字")
     p.add_argument("--kb", required=True, help="该品牌知识库目录")
-    p.add_argument("--teacher", help="负责这个品牌的文案老师；记忆归属靠它区分")
+    p.add_argument("--teacher", required=True,
+                   help="负责这个品牌的文案老师；必填，记忆归属靠它隔离")
     p.add_argument("--brand-key", dest="brand_key", help="ASCII 短标识，默认自动推导")
     p.add_argument("--official", action="append", help="官方来源域名或 URL，可重复")
     p.add_argument("--notes", help="这个工作空间的特殊约定")
     p.add_argument("--create", action="store_true",
                    help="知识库目录还不存在时，按标准语料布局建出来再绑定")
     p.add_argument("--force", action="store_true",
-                   help="改绑品牌／老师／知识库，或忽略空目录与品牌集合层拦截")
+                   help="同品牌同老师迁移知识库路径，或确认绕过空目录／集合层启发式；"
+                        "不能改品牌或老师")
     p.set_defaults(func=cmd_bind)
 
     p = sub.add_parser("status", help="看当前绑定")
@@ -659,6 +662,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--evidence-boundary", choices=list(run_record.EVIDENCE_BOUNDARIES),
                    help="attachments=以附件为准，先只用附件成稿；kb=允许在绑定库内自主检索。"
                         "不给时：有附件默认 attachments，无附件默认 kb")
+    p.add_argument("--started-via", choices=list(run_record.ENTRY_ALIASES),
+                   default=run_record.ENTRY,
+                   help="记录用户实际使用的 Claude Code 显式入口；同名冲突时可能是命名空间形式")
     p.set_defaults(func=cmd_open)
 
     p = sub.add_parser("stage", help="标记运行走到了哪一步")

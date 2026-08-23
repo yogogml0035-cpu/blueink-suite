@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import audit as audit_mod        # noqa: E402
 import index_kb                  # noqa: E402
 import memory as memory_mod      # noqa: E402
+import miniyaml                  # noqa: E402
 import official as official_mod  # noqa: E402
 import retrieve as retrieve_mod  # noqa: E402
 import run_record                # noqa: E402
@@ -123,7 +124,35 @@ def kb_of(project: Path) -> Path:
     return Path(str(workspace.load(project)["kb_root"]))
 
 
+def test_cross_platform_config() -> None:
+    """Windows 盘符与 UNC 路径写进 workspace.yaml 后必须原样读回。"""
+    for value in (
+        r"C:\Users\张老师\Documents\理想汽车知识库",
+        r"C:\Users\Zhang San\Documents\Brand KB",
+        r"\\fileserver\brand-share\理想汽车",
+    ):
+        encoded = miniyaml.dumps({"kb_root": value})
+        decoded = miniyaml.loads(encoded)
+        check(f"Windows 路径往返不变：{value}", decoded["kb_root"] == value,
+              f"{encoded!r} -> {decoded!r}")
+
+
 def test_bind(tmp: Path, kb: Path) -> Path:
+    # 家目录不能成为所有下级项目的隐式工作空间。用可替换常量造一个假家目录，
+    # 不读取或修改运行测试这台机器的真实 HOME。
+    fake_home = tmp / "home"
+    child = fake_home / "projects" / "brand-a"
+    (fake_home / ".blueink").mkdir(parents=True)
+    child.mkdir(parents=True)
+    original_home = workspace.HOME_DIR
+    workspace.HOME_DIR = fake_home.resolve()
+    try:
+        check("下级项目不继承家目录工作空间", workspace.find_project_root(child) is None)
+        expect_raises("禁止把家目录绑定成项目根", workspace.WorkspaceError,
+                      workspace.bind, "品牌甲", kb, teacher="张老师", start=fake_home)
+    finally:
+        workspace.HOME_DIR = original_home
+
     project = tmp / "proj"
     project.mkdir()
 
@@ -150,6 +179,8 @@ def test_bind(tmp: Path, kb: Path) -> Path:
     check("官方来源归一化到主域", data["official_sources"][0]["url"] == "https://example.com",
           str(data["official_sources"]))
     check("路径被丢弃时有告警", any("/news" in w for w in warnings), str(warnings))
+    ignore = project / ".blueink" / ".gitignore"
+    check("本地工作空间默认不进版本控制", ignore.read_text(encoding="utf-8") == "*\n!.gitignore\n")
 
     # 改绑：品牌、老师、知识库任一变化都要拦
     for label, kwargs in (
@@ -159,13 +190,37 @@ def test_bind(tmp: Path, kb: Path) -> Path:
         exc = expect_raises(f"{label}应被拦截", workspace.WorkspaceError, workspace.bind,
                             kwargs["brand"], kb, teacher=kwargs["teacher"], start=project)
         if exc is not None:
-            check(f"{label}的报错说清了改了什么", "改为" in str(exc), str(exc))
+            check(f"{label}的报错要求新项目", "新建项目" in str(exc), str(exc))
+        expect_raises(f"{label}加 --force 也应被拦截", workspace.WorkspaceError,
+                      workspace.bind, kwargs["brand"], kb, teacher=kwargs["teacher"],
+                      force=True, start=project)
 
-    # 未记名时给告警而不是失败
+    # 新工作空间不再允许未记名：否则无法兑现“一位老师”的隔离承诺。
     plain = tmp / "p_plain"
     plain.mkdir()
-    _, warns = workspace.bind("品牌甲", kb, start=plain)
-    check("未登记老师时告警", any("未记名" in w for w in warns), str(warns))
+    err = expect_raises("未登记老师时拒绝", workspace.WorkspaceError,
+                        workspace.bind, "品牌甲", kb, start=plain)
+    check("未登记老师的报错点明隔离原因", "一位老师" in str(err), str(err))
+
+    # 同一品牌同一老师换电脑或移动知识库：只迁移路径，清空可重建索引，
+    # 保留官方白名单、学习目录与历史运行。
+    moved = tmp / "kb_moved"
+    shutil.copytree(kb, moved)
+    stale = project / ".blueink" / "index" / "index.json"
+    stale.write_text('{"stale": true}', encoding="utf-8")
+    expect_raises("知识库路径变化未确认时拒绝", workspace.WorkspaceError,
+                  workspace.bind, "品牌甲", moved, teacher="张老师", start=project)
+    migrated, migrated_warnings = workspace.bind(
+        "品牌甲", moved, teacher="张老师", force=True, start=project
+    )
+    check("同身份可以迁移知识库路径", migrated["kb_root"] == str(moved.resolve()))
+    check("迁移后旧索引已清空", not stale.exists())
+    check("迁移后保留官方白名单",
+          migrated["official_sources"][0]["url"] == "https://example.com",
+          str(migrated["official_sources"]))
+    check("迁移明确要求重建索引", any("运行 index" in w for w in migrated_warnings),
+          str(migrated_warnings))
+    check("迁移保留学习目录", (project / ".blueink" / "learning").is_dir())
     return project
 
 
@@ -258,6 +313,25 @@ def test_index_and_retrieve(project: Path) -> None:
 
     # 检索结果透出内容状态
     check("检索结果带 content_status", all("content_status" in h for h in hit["hits"]))
+
+    # 换电脑／移动目录后不能继续返回旧索引的貌似正常结果。
+    current_kb = kb_of(project)
+    hidden_kb = current_kb.with_name(current_kb.name + "-temporarily-moved")
+    current_kb.rename(hidden_kb)
+    try:
+        expect_raises("知识库路径失效时拒绝旧索引检索", workspace.WorkspaceError,
+                      retrieve_mod.search, "上市", start=project)
+    finally:
+        hidden_kb.rename(current_kb)
+
+    index_path = project / ".blueink" / "index" / "index.json"
+    corrupted = json.loads(index_path.read_text(encoding="utf-8"))
+    corrupted["kb_root"] = str(project / "另一个知识库")
+    index_path.write_text(json.dumps(corrupted, ensure_ascii=False), encoding="utf-8")
+    err = expect_raises("索引根与工作空间不一致时拒绝检索", workspace.WorkspaceError,
+                        retrieve_mod.search, "上市", start=project)
+    check("拒绝时要求重建索引", "index --full" in str(err), str(err))
+    index_kb.build(full=True, start=project)
 
 
 def test_symlink_skipped(tmp: Path) -> None:
@@ -755,6 +829,17 @@ def test_brand_mismatch(tmp: Path) -> None:
     check("简称可以正常开启", meta["brand"] == "理想汽车", str(meta["brand"]))
     check("记下了老师本次说的品牌", meta.get("brand_asked") == "理想", str(meta.get("brand_asked")))
 
+    namespaced = run_record.open_run(
+        "定位", start=project, brand="理想汽车",
+        started_via="/blueink-suite:blueink-suite",
+    )
+    check("Claude Code 命名空间入口被如实记录",
+          namespaced["started_via"] == "/blueink-suite:blueink-suite")
+    a1 = next(c for c in audit_mod.audit(
+        str(run_record.run_dir_for(namespaced["run_id"], project)), None
+    )["checks"] if c["id"] == "A1")
+    check("命名空间入口通过 A1", a1["status"] != "fail", str(a1))
+
 
 def test_attachment_only_run(tmp: Path) -> None:
     """老师直接给了参考文件路径：本次不需要品牌知识库。
@@ -902,6 +987,7 @@ def main() -> int:
     try:
         kb = tmp / "kb"
         build_kb(kb)
+        test_cross_platform_config()
         project = test_bind(tmp, kb)
         test_index_and_retrieve(project)
         test_symlink_skipped(tmp)

@@ -44,8 +44,8 @@
 审计器把六项验收契约变成机械检查，直接告诉你这次运行在哪一条上违约。
 
 ```bash
-python3 scripts/blueink.py audit --input .blueink/runs/<run_id> --output /tmp/verdict.json
-python3 scripts/blueink.py audit --run <run_id> --memory <记忆库快照路径>
+$BLUEINK audit --input "<当前项目根>/.blueink/runs/<run_id>" --output "<当前电脑临时目录>/verdict.json"
+$BLUEINK audit --run <run_id> --memory <记忆库快照路径>
 ```
 
 `--memory` 平时不用给：A6 会自动在运行目录和项目 `learning/` 下找记忆快照。只在审一份从别处拷来的运行记录时才需要显式指定。
@@ -54,7 +54,7 @@ python3 scripts/blueink.py audit --run <run_id> --memory <记忆库快照路径>
 
 | 契约 | 检查内容 | 判为违约的情况 |
 |---|---|---|
-| `A1 入口唯一` | `meta.json` 记录了显式启动与 `run_id` | 缺 `meta.json`；`started_via` 不是 `/blueink-suite`；没有启动回执标记 |
+| `A1 入口唯一` | `meta.json` 记录了 Claude Code 显式启动与 `run_id` | 缺 `meta.json`；`started_via` 不是 `/blueink-suite` 或规范化的 `/blueink-suite:blueink-suite`；没有启动回执标记 |
 | `A2 单品牌隔离` | 所有 `read_paths` 落在 `kb_root` 内**或已登记的本次附件**内，且文件真实存在；无跨品牌实体 | 出现既不在 `kb_root`、也不在 `meta.task_attachments` 里的路径；相对路径含 `..`；**声称读过但文件不存在（等于凭空写出的引用）**；软链接指向库外；`verify.cross_brand` 非空 |
 | `A3 动态访谈` | 每轮恰好一个问题；有停止理由 | 某轮 `question` 含多个问号；缺 `stopped_because`；连续两轮 `changed` 为空 |
 | `A4 责任隔离` | 六份回执的 `role` 与阶段对应；写作者未扫库；核验角色未改稿 | 写作者 `read_paths` 含未授权的库内文件；写作回执缺 `deviations` 字段；有正文却没有写作回执；`verify.json` / `adversary.json` 出现改写后的句子 |
@@ -103,10 +103,10 @@ python3 scripts/blueink.py audit --run <run_id> --memory <记忆库快照路径>
 
 **工作空间与绑定**
 
-- **`.blueink/` 在项目目录里、不在技能目录里，并且是向上查找的。** 技能本体不含任何品牌语料，复制技能不会带走绑定和记忆。曾在家目录执行过 `bind` 的话，家目录下所有项目都会解析到那一个工作空间——`status` 与 `doctor` 第一行都打印当前解析到的项目根，看到不对就换目录重新绑定。换电脑或知识库改名后必须重新绑定，否则检索返回空而不是报错。
+- **`.blueink/` 在项目目录里、不在技能目录里，并且在项目范围内向上查找。** 下级项目不会继承家目录的 `.blueink/`，`bind` 也拒绝直接把家目录作为项目根。换电脑或知识库改名后，用同品牌同老师的 `bind --force` 迁移路径并重建索引；路径失效或索引身份不一致时 `retrieve` 会拒绝旧结果，不会静默返回旧候选。
 - **绑到品牌集合层会被直接拦住，不是告警。** 判定是结构启发式：子目录没有语料布局特征词、而是并列的若干名字就判为集合层。这条同时拦住"绑到四品牌总根"和"绑到现代汽车这一层"（它下面是 现代中国 与 现代 N 品牌 两个同级品牌）。确认是单一品牌时用 `--force`，此时会提示跨品牌污染检查将失效。
-- **品牌、老师、知识库任一改变的改绑都会被拒。** 改绑会让现有索引与记忆的归属失真，而失真是看不出来的。换品牌或换人请新建项目目录。
-- **没登记老师不会失败，但记忆会标成"未记名"。** `doctor` 会持续提示。同一记忆库里出现两位老师的署名时，审计 A6 判违约。
+- **品牌或老师改变的改绑都会被拒，即使带 `--force`。** 换品牌或换人请新建项目目录；只有同身份知识库路径迁移可以显式确认。
+- **新绑定没登记老师会直接失败。** 旧版工作空间仍可能显示“未记名”；补登记要人工确认后用 `--force`，已有未记名记忆仍需复核。同一记忆库里出现两位老师的署名时，审计 A6 判违约。
 - **未绑定时只能以 `绑定` 模式 `open`。** 否则会开出一次"品牌: 未绑定"的运行、启动回执照样打出来，看起来像正常执行——这正是本技能要消灭的静默失败。
 
 **附件与检索范围**
@@ -128,7 +128,7 @@ python3 scripts/blueink.py audit --run <run_id> --memory <记忆库快照路径>
 - **未绑定不等于出错。** `status` 退出码 1 只说明这个项目还没绑定。两条正常出路：在访谈里问出知识库目录再 `bind`（老师还没有目录时加 `--create`），或者本次只用老师给的文件（`open --attach`）。**不要**因为未绑定就停下来报错。
 - **`--create` 建出来的目录是空的。** `bind` 会明确提示检索会返回空。这时候不要开始写稿——先让老师把稿件丢进去，跑一次 `index`。空库上成稿等于全部靠模型即兴发挥，而那正是要消灭的东西。
 - **本次品牌与绑定品牌不一致时不许自己选边。** `check-brand` 和 `open --brand` 都会拦。判定认简称（「理想」= 「理想汽车」），但「现代中国」≠「现代汽车」。把三条出路交给老师：品牌名写错了、换项目、或本次只参考指定文件。
-- **`bind --force` 不是"这一稿换个库查"的操作。** 它是"这个项目从此换品牌"，会作废现有索引并让已有记忆的归属不再准确。只有老师明确说要整体转品牌时才用。
+- **`bind --force` 不允许换品牌或老师。** 它只用于确认被集合层启发式误判的单品牌目录，或同品牌同老师换电脑／移动知识库路径。路径迁移会清空可重建索引并要求重跑 `index`，学习记忆与历史运行保留。
 - **未绑定的运行里，任何目录都是越界。** 没有 `kb_root` 就没有"可自主检索的范围"，审计只认登记过的附件。缺料时向老师要，不要自己找。启动回执里的"无知识库·以附件为准"就是这条边界的可见标志。
 
 **访谈**
@@ -166,10 +166,10 @@ python3 scripts/blueink.py audit --run <run_id> --memory <记忆库快照路径>
 成本里还有一项不能只说时间：**留存**。运行目录里有访谈原文、素材路径和交付正文。所以留存期是一条显式策略而不是"永远不删"——默认保留 90 天，且无论多旧至少保留最近 20 次运行（几个月才写一稿的老师纯按时间清会被清空，而那正是他定位问题时唯一的依据）。
 
 ```bash
-python3 scripts/blueink.py purge                          # 试运行，打印将删除哪些
-python3 scripts/blueink.py purge --apply                  # 真的删
-python3 scripts/blueink.py purge --keep-days 30 --apply   # 改留存天数
-python3 scripts/blueink.py purge --keep-runs 5  --apply   # 改"无论多旧至少保留几次"
+$BLUEINK purge                          # 试运行，打印将删除哪些
+$BLUEINK purge --apply                  # 真的删
+$BLUEINK purge --keep-days 30 --apply   # 改留存天数
+$BLUEINK purge --keep-runs 5  --apply   # 改"无论多旧至少保留几次"
 ```
 
 `--keep-days` 与 `--keep-runs` 两条保护**取并集**：只有同时越过两条线的运行才会被删。所以 `--keep-runs 0` 才是"纯按时间清"，而那正是几个月写一稿的老师会被清空的那种配置。
@@ -193,7 +193,7 @@ python3 scripts/blueink.py purge --keep-runs 5  --apply   # 改"无论多旧至�
 如果三步都做完仍然定位不到，说明这次失败的形态还没被建模。**把它记进方法论候选**，不要临时加一条规则去堵：
 
 ```bash
-python3 scripts/blueink.py memory add --scope methodology \
+$BLUEINK memory add --scope methodology \
         --note "<现象、已排除的可能、缺哪一份证据才能定位>"
 ```
 

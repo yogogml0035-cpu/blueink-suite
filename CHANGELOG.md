@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.0 — 2026-08-23
+
+Claude Code 专用版本（破坏性变更）。
+
+- 只保留 Claude Code：移除跨工具导航文件、Codex／通用安装分支与同名 commands 入口；根级 `SKILL.md` 成为唯一入口。
+- marketplace 安装命令改为 `blueink-suite@blueink-suite`；删除返回 404 的 marketplace `$schema` 地址。
+- 直装脚本仅安装完整 Claude Code 插件；六个角色由根级 `agents/` 自动发现，不再复制到全局 agents 目录。
+- 六个角色使用 `blueink-suite:<role>` 插件命名空间，避免升级时误调旧版全局 `blueink-*` 角色。
+- 新绑定强制要求 `--teacher`；品牌或老师改变时即使带 `--force` 也拒绝。
+- 同品牌同老师换电脑或移动知识库时允许 `bind --force` 迁移路径；自动清空可重建索引，保留学习记忆与历史运行。
+- `.blueink/` 新增本地 `.gitignore`，避免绝对路径、运行正文和个人偏好随项目仓库分发。
+- 修正工作空间模板，使 `corpus_layout` 与 `bind --create` 实际生成的 `01` 至 `05` 五类目录一致。
+- 业务任务单与运行命令不再写死作者电脑路径或假定 `python3`；运行时必须解析当前 macOS／Windows 的解释器与绝对路径。
+- 将“物理隔离”“源库永远只读”“`.blueink/` 全部可删可重建”等过度承诺改为带前提、带例外的可验证边界。
+
 ## 1.0.0 — 2026-08-23
 
 首个版本。

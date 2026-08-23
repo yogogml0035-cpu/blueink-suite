@@ -72,7 +72,7 @@
 - `memory list` 默认只列当前工作空间登记的那位老师的记忆；发现库里有别人的记忆会明确报出来，而不是静默过滤。
 - 审计 A6 在同一记忆库里发现两个署名时直接判违约。
 - v1 老工作空间迁上来的记忆标成"未记名"，不算混人，但 `doctor` 会持续提示补 `--teacher`。
-- 换人就换项目。`bind` 检测到老师改变会拒绝，除非 `--force`。
+- 换人就换项目。`bind` 检测到老师改变时即使带 `--force` 也拒绝；`--force` 不绕过老师隔离。
 
 ## 七 · 按置信度使用
 
@@ -130,14 +130,14 @@
 `distinct_events` 与 `evidence_count` 分开记，因为置信度按前者结算。
 
 ```bash
-python3 scripts/blueink.py memory list      --brand "理想汽车" [--min-confidence 0.65]
-python3 scripts/blueink.py memory add       --file <feedback.json>
-python3 scripts/blueink.py memory confirm   --id M-2026-08-22-01
-python3 scripts/blueink.py memory reinforce --id M-2026-08-22-01 --run <run_id> [--same-event]
-python3 scripts/blueink.py memory counter   --id M-2026-08-22-01 --run <run_id> \
+$BLUEINK memory list      --brand "理想汽车" [--min-confidence 0.65]
+$BLUEINK memory add       --file <feedback.json>
+$BLUEINK memory confirm   --id M-2026-08-22-01
+$BLUEINK memory reinforce --id M-2026-08-22-01 --run <run_id> [--same-event]
+$BLUEINK memory counter   --id M-2026-08-22-01 --run <run_id> \
         --note "核心信息稿老师要求保留原始参数" [--narrow "核心信息"]
-python3 scripts/blueink.py memory cancel    --id M-2026-08-22-01 --run <run_id>
-python3 scripts/blueink.py memory retire    --id M-2026-08-22-01 --note "老师明确否定"
+$BLUEINK memory cancel    --id M-2026-08-22-01 --run <run_id>
+$BLUEINK memory retire    --id M-2026-08-22-01 --note "老师明确否定"
 ```
 
 `--narrow` 是"缩小适用范围"的执行方式：它给旧结论追加一条不适用范围，同时记下反例。**优先用它，而不是让置信度一路降到失效**——降置信度只是让这条记忆变哑，缩范围才是把观察保留下来并说清它在哪里成立。

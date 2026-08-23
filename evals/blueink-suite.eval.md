@@ -12,7 +12,7 @@
 
 ```bash
 python3 scripts/blueink.py audit --input <运行记录目录> --output <结论.json>
-python3 scripts/test_state.py          # 状态层回归，158 项检查
+python3 scripts/test_state.py          # 状态层回归，171 项检查
 python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致性 / 变异承重
 ```
 
@@ -30,9 +30,9 @@ python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致
 | `explained` | 每条检查的 detail 非空；被跳过的检查不能写成「通过」 | 把"没查"伪装成"查过了"是最危险的一种输出 |
 | `contracts` | 六项名称依次为：入口唯一、单品牌隔离、动态访谈、责任隔离、输出有效、学习不僵化 | 防止某项契约被悄悄改名或换掉 |
 
-**状态层回归检查**（`state-layer` / `explicit-entry` / `role-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计和附件登记，共 158 项。
+**状态层回归检查**（`state-layer` / `explicit-entry` / `role-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计和附件登记，共 171 项。
 
-**自证检查**（`self-claims` / `self-mutation` / `pipeline-wiring`）验的是"声明与实际是否一致"这一类不会报错的漂移。其中 `self-mutation` 是这份规格里唯一的**负向**检查：它真的往技能副本里注入五个已知失败形态，断言每一个都会让指定检查转红。
+**自证检查**（`self-claims` / `self-mutation` / `pipeline-wiring`）验的是"声明与实际是否一致"这一类不会报错的漂移。其中 `self-mutation` 是这份规格里唯一的**负向**检查：它真的往技能副本里注入七个已知失败形态，断言每一个都会让指定检查转红。
 
 理由要说清楚。一段声称能抓住错误的检查，在它从没被喂过错误输入的情况下，和一段 `return True` 无法区分——"我们做过变异测试"如果只是 README 里的一句话，它证明不了任何事。变异靶点找不到时判**失败**而不是跳过：一个打不进去的变异什么都没测到，却会让这道门继续显示绿色。
 
@@ -136,7 +136,7 @@ python3 scripts/evolve.py                                # 一次跑完上面全
      "cmd": "python3 scripts/test_state.py"},
     {"id": "self-claims", "text": "声明与实际一致：文档里的检查项数、子命令面、边界清单、留存策略、脚本清单双向核对，且 Python 底线在底线版本上真的跑得起来", "type": "command",
      "cmd": "python3 scripts/self_check.py --compat --claims"},
-    {"id": "self-mutation", "text": "五个已知失败形态注入技能副本后，每一个都让指定检查转红；靶点失效判失败而不是跳过", "type": "command",
+    {"id": "self-mutation", "text": "七个已知失败形态注入技能副本后，每一个都让指定检查转红；靶点失效判失败而不是跳过", "type": "command",
      "cmd": "python3 scripts/self_check.py --mutation"},
     {"id": "pipeline-wiring", "text": "全部脚本可编译，第三方依赖已声明，单一编排入口存在", "type": "command",
      "cmd": "python3 scripts/check_pipeline.py ."},
