@@ -152,6 +152,7 @@ def check(root: Path) -> list[str]:
             ("不在写作时重新检索、换主线或补事实", "默认生成允许成稿时重新选素材"),
             ("run.json", "默认生成缺新版聚合运行记录"),
             ("delivery.md", "默认生成缺业务交付文件"),
+            ("最终回复必须直接输出 `delivery.md` 的", "默认生成允许最终回复只给交付路径"),
         ):
             if marker not in text:
                 problems.append(message)
