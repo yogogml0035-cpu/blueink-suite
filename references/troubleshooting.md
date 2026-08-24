@@ -6,9 +6,10 @@
 
 | 现象 | 先看 | 判断 |
 |---|---|---|
-| 问错了、方向没确认、事实范围错 | `run.json` | `interview`、`direction`、`facts`、`decision` |
+| 问错了、方向没确认、事实范围错 | `run.json` | `interview`、`direction`；进入扩展研究时再看 `facts`、`decision` |
 | 正文没有执行已确认方向 | `draft.md` + `run.json` | 方向、素材取舍和正文是否一致 |
-| 强比较、数字、时效或来源有问题 | `verify.json` | `claims`、`coverage`、`sources_used` |
+| 初稿迟迟没有展示 | `run.json.metrics` | `direction_saved_at`、`draft_handoff_at` 与两段实际耗时 |
+| 强比较、数字、时效或来源有问题 | `verify.json` | `risk_sentences`、`claims`、`coverage`、`sources_used` |
 | 老师看到的内容不完整 | `delivery.md` | 正文、结论和实际来源是否齐全 |
 
 新运行不应出现 `interview.json`、`evidence.json`、`strategy.json`、`program.json`、`write-receipt.json` 或 `adversary.json`。这些只属于 3.x 历史运行。
@@ -36,6 +37,20 @@ $BLUEINK audit --run <run_id>
 | 来源未登记或越界 | 用 `open --attach` 登记，或确认来源位于绑定根内 |
 | 强比较词未授权 | 补足来源范围后授权；否则改成有限定条件的分析判断 |
 | `verify` 早于正文 | 先写 `draft.md`，不要造空核验 |
+| 轻量核验早于 `handoff` | 先展示完整可修改初稿并切换正文所有权 |
+| `handoff` 后正文哈希变化 | 不自动覆盖；旧核验不冒充当前稿，只向老师报告局部建议 |
+
+## 参数索引
+
+- 全局：`--project`、`--json`。
+- `bind`：`--brand`、`--kb`、`--brand-key`、`--official`、`--notes`、`--create`、`--force`。
+- `index`：`--full`、`--limit`；`check-brand`：`--brand`。
+- `retrieve`：`--query`、`--category`、`--track`、`--limit`、`--since`、`--loose`、`--include-instruction-artifacts`、`--run`。
+- `official`：`--url`；`open`：`--mode`、`--brand`、`--attach`、`--evidence-boundary`、`--started-via`。
+- `save`：`--run`、`--kind`、`--input`；`handoff`、`close`：`--run`。
+- `purge`：`--keep-days`、`--keep-runs`、`--apply`。
+- `memory`：`--id`、`--file`、`--note`、`--narrow`、`--scope`、`--brand`、`--run`、`--min-confidence`、`--include-retired`、`--same-event`。
+- `audit`：`--input`、`--run`、`--output`、`--exit-zero`；`check-verdict`：`--check`。
 
 ## 工作空间
 
@@ -73,4 +88,6 @@ claude plugin enable blueink-suite@blueink-suite --scope user
 
 - 新任务写 `run.json`；`meta.json` 只表示 3.x 历史运行，不要混写两套合同。
 - `save` 失败不会覆盖正式 JSON；修输入后重试当前写入即可。
-- `close` 会从正文和核验结论生成 `delivery.md`，不要让模型再写一份不同正文。
+- Claude Code 加载结果已经给出 Skill `Base directory`；`${CLAUDE_PLUGIN_ROOT}` 为空时用它，不要重新搜索安装目录。
+- `handoff` 会展示初稿并记录正文哈希；之后当前智能体不再写 `draft.md`。
+- `close` 会从正文和核验结论生成 `delivery.md`，正文版本变化时会拒绝套用旧核验。

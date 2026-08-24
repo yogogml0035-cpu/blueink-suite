@@ -841,7 +841,7 @@ def test_brand_mismatch(tmp: Path) -> None:
     )
     check("Claude Code 命名空间入口被如实记录",
           namespaced["started_via"] == "/blueink-suite:blueink-suite")
-    meta_path = run_record.run_dir_for(namespaced["run_id"], project) / "meta.json"
+    meta_path = run_record.run_dir_for(namespaced["run_id"], project) / "run.json"
     expanded = json.loads(meta_path.read_text(encoding="utf-8"))
     expanded["unexpected_field"] = "不会进入当前 schema"
     meta_path.write_text(json.dumps(expanded, ensure_ascii=False), encoding="utf-8")
@@ -901,21 +901,141 @@ def test_attachment_only_run(tmp: Path) -> None:
                   run_record.open_run, "生成", start=project,
                   attachments=[str(one)], evidence_boundary="kb")
 
-    # 审计：未绑定运行里，只有登记过的附件算合法来源，其余一律越界。
+    # 当前快线：未绑定运行里，只有登记过的附件算合法来源，其余在写核验时拒绝。
     run_dir = run_record.run_dir_for(meta["run_id"], project)
     outside = tmp / "别人的库" / "东风奕派" / "稿子.md"
     outside.parent.mkdir(parents=True)
     outside.write_text("奕派 eπ008", encoding="utf-8")
-    (run_dir / "evidence.json").write_text(json.dumps({
-        "role": "evidence-researcher", "run_id": meta["run_id"], "task_id": "T1",
-        "status": "ok", "read_paths": [str(one), str(outside)],
-        "facts": [], "discarded": [],
-    }, ensure_ascii=False), encoding="utf-8")
-    verdict = audit_mod.audit(str(run_dir))
-    a2 = next(c for c in verdict["checks"] if c["id"] == "A2")
-    check("附件模式下越界照样抓得到", a2["status"] == "fail", str(a2))
-    check("越界报的是那个库外文件", "稿子.md" in a2["detail"], str(a2["detail"]))
-    check("登记过的附件不被判越界", "指引.md" not in a2["detail"], str(a2["detail"]))
+    run_record.save_decision(meta["run_id"], {
+        "interview": {
+            "rounds": [{"n": 1, "kind": "direction", "question": "按推荐写，可以吗？",
+                        "answer": "可以", "changed": "确认方向"}],
+            "stopped_because": "下一问不会改变传播主线",
+        },
+        "direction": {
+            "options": [{"id": "A", "name": "推荐", "claim": "按指引成稿",
+                         "suitable_for": "媒体", "cost": "弱化背景"}],
+            "selected": "A", "confirmed_by_user": True,
+        },
+    }, start=project)
+    (run_dir / "draft.md").write_text("正文", encoding="utf-8")
+    run_record.handoff_draft(meta["run_id"], start=project)
+    err = expect_raises(
+        "附件模式下越界照样抓得到", ValueError, run_record.save_verify,
+        meta["run_id"],
+        {"issues": [], "sources_used": [{"path_or_url": str(outside), "kind": "外部"}]},
+        start=project,
+    )
+    check("越界报的是那个库外文件", "稿子.md" in str(err), str(err))
+    check("登记过的附件仍可用于核验", run_record._allowed_source(str(one), meta))
+
+
+def test_attachment_draft_first(tmp: Path) -> None:
+    """附件快线先交初稿，再用轻量问题核验；交付后正文不被自动覆盖。"""
+    project = tmp / "draft_first"
+    project.mkdir()
+    (project / ".blueink").mkdir()
+    source = tmp / "draft-first-source.md"
+    source.write_text(
+        "2026年一季度交付10万辆，位居细分市场第一。", encoding="utf-8"
+    )
+    meta = run_record.open_run(
+        "生成", start=project, brand="品牌甲", attachments=[str(source)]
+    )
+    decision = {
+        "interview": {
+            "rounds": [{
+                "n": 1,
+                "kind": "direction",
+                "question": "这一稿按销量韧性主线写，可以吗？",
+                "answer": "可以",
+                "changed": "确认销量韧性主线",
+            }],
+            "stopped_because": "下一问不会改变传播主线与信息权重",
+        },
+        "direction": {
+            "options": [{
+                "id": "A",
+                "name": "销量韧性",
+                "claim": "交付结果验证经营韧性",
+                "suitable_for": "行业媒体",
+                "cost": "弱化产品细节",
+            }],
+            "selected": "A",
+            "confirmed_by_user": True,
+        },
+    }
+    saved = run_record.save_decision(meta["run_id"], decision, start=project)
+    check("附件快线只保存轻量方向", saved["decision"] == {"path": "attachment-draft-first"})
+    check("附件快线不在初稿前造事实原子", saved["facts"] == [])
+
+    run_dir = run_record.run_dir_for(meta["run_id"], project)
+    draft_path = run_dir / "draft.md"
+    draft_text = "# 初稿\n\n2026年一季度交付10万辆，位居细分市场第一。这说明经营韧性得到验证。\n"
+    draft_path.write_text(draft_text, encoding="utf-8")
+    handed = run_record.handoff_draft(meta["run_id"], start=project)
+    check("handoff 返回完整可修改初稿", "经营韧性" in handed["draft"])
+    check("handoff 记录方向到初稿耗时", handed["metrics"].get("direction_to_draft_seconds") is not None)
+    check("handoff 自动提取高风险句", any(
+        "比较范围" in item["signals"] for item in handed["risk_sentences"]
+    ), str(handed["risk_sentences"]))
+    import subprocess as _sp_handoff
+    entry = str(Path(__file__).resolve().parent / "blueink.py")
+    cli = _sp_handoff.run(
+        [sys.executable, entry, "--project", str(project), "handoff", "--run", meta["run_id"]],
+        capture_output=True, text=True,
+    )
+    check("handoff 命令会立即展示完整初稿", cli.returncode == 0 and "经营韧性" in cli.stdout,
+          f"rc={cli.returncode} out={cli.stdout[-160:]} err={cli.stderr[-160:]}")
+
+    before = draft_path.read_bytes()
+    verify = run_record.save_verify(
+        meta["run_id"],
+        {"issues": [], "cross_brand": [], "redline_hits": [], "editorial_risks": []},
+        start=project,
+    )
+    check("轻量核验不要求手抄 matched claims", verify["review_mode"] == "issues-only-after-handoff")
+    check("轻量核验复用已登记附件", verify["sources_used"][0]["path_or_url"] == str(source.resolve()))
+    check("核验没有覆盖老师初稿", draft_path.read_bytes() == before)
+    verify = run_record.save_verify(
+        meta["run_id"],
+        {"issues": [{
+            "quote": "经营韧性得到验证",
+            "judgement": "drifted",
+            "action": "建议改为体现经营韧性",
+        }]},
+        start=project,
+    )
+    check("轻量问题用短片段定位并保存完整原句", (
+        verify["claims"][0]["quote"].endswith("经营韧性得到验证。")
+    ), str(verify["claims"]))
+    check("核验记录初稿到核验耗时", (
+        run_record.load_meta(meta["run_id"], project).get("metrics") or {}
+    ).get("draft_to_verify_seconds") is not None)
+    run_record.handoff_draft(meta["run_id"], start=project)
+    check("重复展示初稿不会把核验阶段倒退", (
+        run_record.load_meta(meta["run_id"], project).get("stage") == 6
+    ))
+
+    closed = _sp_handoff.run(
+        [sys.executable, entry, "--project", str(project), "close", "--run", meta["run_id"]],
+        capture_output=True, text=True,
+    )
+    delivery = run_dir / "delivery.md"
+    check("初稿快线完成四份产物并直接展示交付", (
+        closed.returncode == 0 and delivery.is_file() and "交付前核对卡" in closed.stdout
+    ), f"rc={closed.returncode} out={closed.stdout[-200:]} err={closed.stderr[-160:]}")
+    check("初稿快线通过五项审计", audit_mod.audit(str(run_dir))["verdict"] == "pass")
+
+    draft_path.write_text(draft_text + "老师新增一句。\n", encoding="utf-8")
+    err = expect_raises(
+        "核验后正文变化时拒绝套旧结论",
+        ValueError,
+        run_record.build_delivery,
+        meta["run_id"],
+        start=project,
+    )
+    check("正文变化错误说明不覆盖老师", "旧核验结论" in str(err), str(err))
 
 
 def _interview_run(tmp: Path, name: str, interview: dict) -> dict:
@@ -1023,6 +1143,7 @@ def main() -> int:
         test_kb_onboarding(tmp)
         test_brand_mismatch(tmp)
         test_attachment_only_run(tmp)
+        test_attachment_draft_first(tmp)
         test_interview_sufficiency(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

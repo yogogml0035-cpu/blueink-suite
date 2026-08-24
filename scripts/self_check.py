@@ -676,8 +676,8 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     (
         "independence-honesty",
         "references/generate.md",
-        "这不是独立审查。只输出问题句与来源对应，不重写全文。",
-        "这是独立审查。可以直接重写全文。",
+        "这不是独立审查。对照来源检查这些句子，只记录确实发现的问题；",
+        "这是独立审查。可以直接重写全文；",
         ["scripts/validate.py"],
         "同一上下文里的复核被重新包装成独立评审，能力边界变成虚假承诺",
     ),

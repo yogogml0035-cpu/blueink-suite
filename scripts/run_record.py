@@ -2,8 +2,8 @@
 """运行记录：让"这次走到了哪一步"变成可查的事实。
 
 每次新运行都开一个目录并落 ``run.json``。它同时保存登记信息、逐轮回答、已确认
-方向与最小事实原子，避免把同一个判断翻译成多份阶段回执。旧运行的 ``meta.json``
-继续只读兼容。
+方向与实际阶段时间。明确附件的普通生成先保存轻量方向，再交付可修改初稿；只有进入
+扩展研究时才补事实原子和完整编辑决策。旧运行的 ``meta.json`` 继续只读兼容。
 
 **这套记账有成本，所以它自带留存期。** 运行目录里躺着访谈原文、素材路径和交付
 正文——它是可定位性的载体，也是一份会无限增长的客户内容留存。``purge`` 把"留多
@@ -51,8 +51,8 @@ STAGE_NAMES = {
     1: "逐轮访谈",
     2: "取证",
     3: "编辑策略",
-    4: "方向与事实已确认",
-    5: "成稿",
+    4: "方向已确认",
+    5: "可修改初稿已交付",
     6: "高风险句复核",
     7: "条件编辑风险",
     8: "交付",
@@ -73,6 +73,13 @@ STAGE_ARTIFACTS = {
 STRONG_WORDS = ("唯一", "全部", "普遍", "均", "最高")
 VERDICTS = ("可进入人工初审", "有待确认项", "暂不建议提交")
 JUDGEMENTS = ("matched", "drifted", "unsourced", "stale")
+
+RISK_COMPARISONS = STRONG_WORDS + (
+    "第一", "领先", "最大", "最低", "最健康", "远高于", "远低于",
+)
+RISK_RELATIONS = ("同比", "环比", "超过", "不足", "增长", "下降", "倍")
+RISK_CAUSAL = ("因此", "证明", "说明", "导致", "意味着", "得益于")
+RISK_TIMELINESS = ("截至", "当前", "目前", "今日", "本月", "一季度", "季度末")
 
 _SLUG = re.compile(r"[^a-z0-9-]+")
 
@@ -361,6 +368,54 @@ def _one_question(text: str) -> bool:
     return str(text or "").count("？") + str(text or "").count("?") <= 1
 
 
+def _elapsed_seconds(started: str | None, ended: datetime) -> float | None:
+    """计算两个本地 ISO 时间之间的秒数；历史脏值返回 ``None``。"""
+    if not started:
+        return None
+    try:
+        value = (ended - datetime.fromisoformat(str(started))).total_seconds()
+    except (TypeError, ValueError):
+        return None
+    return round(max(0.0, value), 3)
+
+
+def _draft_sentences(draft: str) -> list[str]:
+    """按中文正文标点切成可回指的原句，并保持首次出现顺序。"""
+    sentences: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"[^。！？!?\n]+[。！？!?]?", draft):
+        quote = match.group(0).strip()
+        if quote and quote not in seen:
+            seen.add(quote)
+            sentences.append(quote)
+    return sentences
+
+
+def draft_risk_sentences(draft: str) -> list[dict[str, Any]]:
+    """从正文机械提取需要模型复核的句子，不判断它们是否正确。
+
+    提取只负责缩小核验输入：数字、比较、数量关系、因果和时效仍由当前智能体对照
+    本次来源判断。句子保留正文原文，避免模型为核验再次手抄整篇并产生引用偏差。
+    """
+    risks: list[dict[str, Any]] = []
+    for quote in _draft_sentences(draft):
+        signals: list[str] = []
+        if re.search(r"\d", quote):
+            signals.append("数字或日期")
+        if any(word in quote for word in RISK_COMPARISONS):
+            signals.append("比较范围")
+        if any(word in quote for word in RISK_RELATIONS):
+            signals.append("数量关系")
+        if any(word in quote for word in RISK_CAUSAL):
+            signals.append("因果表达")
+        if any(word in quote for word in RISK_TIMELINESS):
+            signals.append("时效")
+        if not signals:
+            continue
+        risks.append({"id": f"R{len(risks) + 1}", "quote": quote, "signals": signals})
+    return risks
+
+
 def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("decision 输入顶层必须是对象")
@@ -411,9 +466,18 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     if not any(str(item.get("kind") or "") == "direction" for item in rounds):
         raise ValueError("interview.rounds 缺成稿前方向确认记录")
 
-    if not isinstance(facts, list) or len(facts) > 12:
+    attachment_fast_path = (
+        facts is None
+        and decision is None
+        and meta.get("evidence_boundary") == "attachments"
+        and bool(attachment_paths(meta))
+    )
+    if attachment_fast_path:
+        facts = []
+        decision = {"path": "attachment-draft-first"}
+    elif not isinstance(facts, list) or len(facts) > 12:
         raise ValueError("facts 必须是数组且最多 12 条")
-    if meta.get("mode") == "生成" and not facts:
+    if meta.get("mode") == "生成" and not facts and not attachment_fast_path:
         raise ValueError("生成任务至少需要一条可追溯事实原子")
     fact_ids = set()
     for index, fact in enumerate(facts):
@@ -443,10 +507,11 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
 
     if not isinstance(decision, dict):
         raise ValueError("decision.decision 必须是对象")
-    for field in ("communication_task", "category", "audience", "publisher",
-                  "material_plan", "information_budget", "expression_bounds", "assumptions"):
-        if field not in decision:
-            raise ValueError(f"decision.decision 缺字段 {field}")
+    if not attachment_fast_path:
+        for field in ("communication_task", "category", "audience", "publisher",
+                      "material_plan", "information_budget", "expression_bounds", "assumptions"):
+            if field not in decision:
+                raise ValueError(f"decision.decision 缺字段 {field}")
     return {
         "interview": interview,
         "direction": direction,
@@ -465,10 +530,60 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     meta["stage"] = 4
     meta["stage_name"] = "方向已确认"
     metrics = dict(meta.get("metrics") or {})
-    metrics["decision_saved_at"] = datetime.now().isoformat(timespec="seconds")
+    saved = datetime.now()
+    metrics["direction_saved_at"] = saved.isoformat(timespec="seconds")
+    metrics["decision_saved_at"] = metrics["direction_saved_at"]
     meta["metrics"] = metrics
     _write_meta(run_dir, meta)
     return meta
+
+
+def handoff_draft(run_id: str, start=None) -> dict[str, Any]:
+    """登记并返回老师可立即修改的初稿；登记后当前智能体不得覆盖正文。"""
+    run_dir = run_dir_for(run_id, start)
+    meta = load_meta(run_id, start)
+    if str(meta.get("mode") or "") != "生成":
+        raise ValueError("只有生成任务可以交付可修改初稿")
+    direction = meta.get("direction")
+    if not isinstance(direction, dict) or direction.get("confirmed_by_user") is not True:
+        raise ValueError("方向尚未得到老师确认，不能交付初稿")
+    draft_path = run_dir / "draft.md"
+    if not draft_path.is_file():
+        raise FileNotFoundError(f"缺 {draft_path}")
+    draft = draft_path.read_text(encoding="utf-8").strip()
+    if not draft:
+        raise ValueError("draft.md 为空，不能交付初稿")
+
+    current_hash = _sha256(draft_path)
+    metrics = dict(meta.get("metrics") or {})
+    previous_hash = str(metrics.get("draft_sha256") or "")
+    if previous_hash and previous_hash != current_hash:
+        raise ValueError(
+            "可修改初稿交给老师后正文发生了变化；当前智能体不得自动覆盖，"
+            "请只提供核验问题和局部替换建议"
+        )
+
+    now = datetime.now()
+    if not metrics.get("draft_handoff_at"):
+        metrics["draft_handoff_at"] = now.isoformat(timespec="seconds")
+        metrics["draft_sha256"] = current_hash
+        metrics["open_to_draft_seconds"] = _elapsed_seconds(meta.get("started_at"), now)
+        metrics["direction_to_draft_seconds"] = _elapsed_seconds(
+            metrics.get("direction_saved_at"), now
+        )
+    meta["metrics"] = metrics
+    if int(meta.get("stage") or 0) < 5:
+        meta["stage"] = 5
+        meta["stage_name"] = STAGE_NAMES[5]
+    _write_meta(run_dir, meta)
+    return {
+        "run_id": run_id,
+        "draft_path": str(draft_path),
+        "draft_sha256": current_hash,
+        "draft": draft,
+        "risk_sentences": draft_risk_sentences(draft),
+        "metrics": metrics,
+    }
 
 
 def _expected_verdict(payload: dict[str, Any]) -> str:
@@ -488,9 +603,68 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
         raise ValueError("缺 draft.md，不能先核验后成稿")
     claims = payload.get("claims")
     sources = payload.get("sources_used")
-    if not isinstance(claims, list):
-        raise ValueError("verify.claims 必须是数组")
     draft = (run_dir / "draft.md").read_text(encoding="utf-8")
+    current_hash = _sha256(run_dir / "draft.md")
+    handed_hash = str((meta.get("metrics") or {}).get("draft_sha256") or "")
+    if handed_hash and handed_hash != current_hash:
+        raise ValueError(
+            "可修改初稿交付后 draft.md 已变化；本轮核验不能冒充当前稿，也不能自动覆盖老师修改"
+        )
+
+    compact_review = claims is None and isinstance(payload.get("issues"), list)
+    risks = draft_risk_sentences(draft)
+    if compact_review:
+        if not handed_hash:
+            raise ValueError("轻量核验前必须先运行 handoff，把可修改初稿交给老师")
+        risk_by_id = {str(item["id"]): item for item in risks}
+        resolved_claims: list[dict[str, Any]] = []
+        for index, issue in enumerate(payload.get("issues") or []):
+            if not isinstance(issue, dict):
+                raise ValueError(f"issues[{index}] 必须是对象")
+            judgement = str(issue.get("judgement") or "")
+            if judgement not in ("drifted", "unsourced", "stale"):
+                raise ValueError(
+                    f"issues[{index}].judgement 必须是 drifted、unsourced 或 stale 之一"
+                )
+            risk_id = str(issue.get("risk_id") or "").strip()
+            fragment = str(issue.get("quote") or "").strip()
+            risk = risk_by_id.get(risk_id) if risk_id else None
+            if risk is None and fragment:
+                matches = [item for item in risks if fragment in str(item["quote"])]
+                if len(matches) == 1:
+                    risk = matches[0]
+            if risk is None and fragment:
+                matches = [quote for quote in _draft_sentences(draft) if fragment in quote]
+                if len(matches) == 1:
+                    risk = {
+                        "id": f"R{len(risks) + 1}",
+                        "quote": matches[0],
+                        "signals": ["模型识别问题"],
+                    }
+                    risks.append(risk)
+                    risk_by_id[str(risk["id"])] = risk
+            if risk is None:
+                raise ValueError(f"issues[{index}] 无法唯一定位到初稿高风险句")
+            action = str(issue.get("action") or "").strip()
+            if not action:
+                raise ValueError(f"issues[{index}] 缺局部修改建议 action")
+            resolved_claims.append({
+                "quote": risk["quote"],
+                "risk": str(issue.get("risk") or "、".join(risk["signals"])),
+                "fact_ids": [],
+                "judgement": judgement,
+                "source_quote": str(issue.get("source_quote") or ""),
+                "action": action,
+            })
+        claims = resolved_claims
+        if sources is None and meta.get("evidence_boundary") == "attachments":
+            sources = [
+                {"path_or_url": path, "kind": "需求材料", "date": ""}
+                for path in attachment_paths(meta)
+            ]
+    elif not isinstance(claims, list):
+        raise ValueError("verify 需要 claims 数组，或使用轻量 issues 数组")
+
     facts_by_id = {
         str(fact.get("id")): fact for fact in (meta.get("facts") or [])
         if isinstance(fact, dict) and fact.get("id")
@@ -509,21 +683,22 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
         fact_ids = claim.get("fact_ids") or []
         if not isinstance(fact_ids, list) or any(str(fid) not in facts_by_id for fid in fact_ids):
             raise ValueError(f"claims[{index}].fact_ids 含 run.json 中不存在的事实 id")
-    for word in STRONG_WORDS:
-        if word not in draft:
-            continue
-        matches = [claim for claim in claims if word in str(claim.get("quote") or "")]
-        if not matches:
-            raise ValueError(f"正文使用强比较词「{word}」，verify.claims 必须逐句复核")
-        for claim in matches:
-            authorized = any(
-                word in (facts_by_id[str(fid)].get("allowed_strong_words") or [])
-                for fid in (claim.get("fact_ids") or []) if str(fid) in facts_by_id
-            )
-            if not authorized:
-                raise ValueError(
-                    f"核验句使用强比较词「{word}」，但引用事实没有授权该比较范围"
+    if not compact_review:
+        for word in STRONG_WORDS:
+            if word not in draft:
+                continue
+            matches = [claim for claim in claims if word in str(claim.get("quote") or "")]
+            if not matches:
+                raise ValueError(f"正文使用强比较词「{word}」，verify.claims 必须逐句复核")
+            for claim in matches:
+                authorized = any(
+                    word in (facts_by_id[str(fid)].get("allowed_strong_words") or [])
+                    for fid in (claim.get("fact_ids") or []) if str(fid) in facts_by_id
                 )
+                if not authorized:
+                    raise ValueError(
+                        f"核验句使用强比较词「{word}」，但引用事实没有授权该比较范围"
+                    )
     if not isinstance(sources, list) or not sources:
         raise ValueError("verify.sources_used 至少包含一条本稿实际来源")
     allowed_sources = {
@@ -552,7 +727,14 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
         "role": "single-agent-verifier",
         "run_id": meta.get("run_id"),
         "claims": claims,
-        "coverage": {"total_claims": len(claims), **counts},
+        "coverage": (
+            {"total_risks": len(risks), "reviewed_risks": len(risks),
+             "issues": len(claims), **counts}
+            if compact_review else {"total_claims": len(claims), **counts}
+        ),
+        "review_mode": "issues-only-after-handoff" if compact_review else "claim-map",
+        "risk_sentences": risks if compact_review else [],
+        "draft_sha256": current_hash,
         "cross_brand": cross_brand,
         "redline_hits": redline_hits,
         "editorial_risks": editorial_risks,
@@ -572,7 +754,11 @@ def save_verify(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     meta["stage"] = 6
     meta["stage_name"] = "高风险句已复核"
     metrics = dict(meta.get("metrics") or {})
-    metrics["verify_saved_at"] = datetime.now().isoformat(timespec="seconds")
+    saved = datetime.now()
+    metrics["verify_saved_at"] = saved.isoformat(timespec="seconds")
+    metrics["draft_to_verify_seconds"] = _elapsed_seconds(
+        metrics.get("draft_handoff_at"), saved
+    )
     meta["metrics"] = metrics
     _write_meta(run_dir, meta)
     return data
@@ -597,6 +783,11 @@ def build_delivery(run_id: str, start=None) -> Path:
     verify = json.loads(verify_path.read_text(encoding="utf-8"))
     if not isinstance(verify, dict) or verify.get("verdict") not in VERDICTS:
         raise ValueError("verify.json 缺合法 verdict")
+    verified_hash = str(verify.get("draft_sha256") or "")
+    if verified_hash and verified_hash != _sha256(draft_path):
+        raise ValueError(
+            "draft.md 在核验后发生了变化；不会用旧核验结论包装老师修改后的正文"
+        )
 
     issues: list[str] = []
     for claim in verify.get("claims") or []:

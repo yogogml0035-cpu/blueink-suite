@@ -892,13 +892,16 @@ def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
     if draft is None:
         check.skip("运行还没成稿（缺 draft.md）")
         return check
-    allowed_words = {
-        word for fact in (record.get("facts") or []) if isinstance(fact, dict)
-        for word in (fact.get("allowed_strong_words") or [])
-    }
-    for word in run_record.STRONG_WORDS:
-        if word in draft and word not in allowed_words:
-            check.fail(f"正文使用未获来源范围授权的强比较词「{word}」", "draft.md")
+    decision = record.get("decision")
+    draft_first = isinstance(decision, dict) and decision.get("path") == "attachment-draft-first"
+    if not draft_first:
+        allowed_words = {
+            word for fact in (record.get("facts") or []) if isinstance(fact, dict)
+            for word in (fact.get("allowed_strong_words") or [])
+        }
+        for word in run_record.STRONG_WORDS:
+            if word in draft and word not in allowed_words:
+                check.fail(f"正文使用未获来源范围授权的强比较词「{word}」", "draft.md")
 
     if not isinstance(verify, dict):
         if _archived(record):
@@ -911,6 +914,14 @@ def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
         check.fail(f"核验结论应为「{expected}」", "verify.json:verdict")
     if not (verify.get("sources_used") or []):
         check.fail("sources_used 为空", "verify.json:sources_used")
+    if draft_first:
+        reviewed = [
+            str(item.get("quote") or "") for item in (verify.get("risk_sentences") or [])
+            if isinstance(item, dict)
+        ]
+        for word in run_record.STRONG_WORDS:
+            if word in draft and not any(word in quote for quote in reviewed):
+                check.fail(f"附件初稿里的强比较词「{word}」没有进入轻量复核清单", "verify.json")
 
     delivery = _text(run_dir, "delivery.md")
     if delivery is None:
