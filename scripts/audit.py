@@ -26,7 +26,7 @@ import workspace
 
 ENTRY = "/blueink-suite"
 ENTRY_ALIASES = (ENTRY, "/blueink-suite:blueink-suite")
-ROLE_BY_FILE = {
+STAGE_ID_BY_FILE = {
     "evidence.json": "evidence-researcher",
     "strategy.json": "editorial-strategist",
     "strategy-b.json": "editorial-strategist",
@@ -59,7 +59,7 @@ REQUIRED_BY_MODE = {
 
 VERDICTS = ("可进入人工初审", "有待确认项", "暂不建议提交")
 
-# 出现在核验／反方回执里就说明该角色越界改稿
+# 出现在核验／红队回执里就说明该阶段越界改稿
 REWRITE_KEYS = {
     "rewritten", "revised", "revised_draft", "new_text", "fixed_text",
     "suggested_sentence", "suggested_text", "replacement", "rewrite",
@@ -356,7 +356,7 @@ def check_isolation(run_dir: Path, meta: Any) -> Check:
         return (not Path(p).is_absolute()) and (run_dir / p).exists()
 
     def allowed(p: str) -> bool:
-        # 运行目录内的文件永远合法。角色读上游回执是编排协议规定的正常流程
+        # 运行目录内的文件永远合法。阶段读取上游回执是执行协议规定的正常流程
         # （策略师读 evidence.json、核验员读 program.json、反方读 draft.md），
         # 它不是"检索越过了绑定目录"。A4 已经这样处理了；这里是同一条保证的
         # 第二个位置——第一次只修了 A4，真实运行一跑就把每一次都判成违约。
@@ -551,13 +551,13 @@ def check_interview(run_dir: Path, meta: Any) -> Check:
 
 
 
-# --- A4 责任隔离 -------------------------------------------------------------
+# --- A4 阶段边界 -------------------------------------------------------------
 
 
-def check_roles(run_dir: Path, meta: Any) -> Check:
-    check = Check("A4", "责任隔离")
+def check_stages(run_dir: Path, meta: Any) -> Check:
+    check = Check("A4", "阶段边界")
 
-    for name, expected in ROLE_BY_FILE.items():
+    for name, expected in STAGE_ID_BY_FILE.items():
         data, err = _load(run_dir, name)
         if err:
             check.fail(err, name)
@@ -625,7 +625,7 @@ def check_roles(run_dir: Path, meta: Any) -> Check:
             continue
         for key_path, value in _walk_strings(data, REWRITE_KEYS):
             if value not in (None, "", [], {}):
-                check.fail(f"{name} 出现改写后的内容（{key_path}）——审查角色只返回问题，不改稿", name)
+                check.fail(f"{name} 出现改写后的内容（{key_path}）——审查阶段只返回问题，不改稿", name)
                 break
     return check
 
@@ -708,7 +708,7 @@ def check_output(run_dir: Path, meta: Any) -> Check:
                 continue
             if declared and ref not in declared and _real(ref) not in declared:
                 check.fail(
-                    f"来源清单里出现没有被任何角色打开过的文件：{ref}"
+                    f"来源清单里出现没有被任何阶段打开过的文件：{ref}"
                     f"（检索候选不算读过——retrieve 不返回全文）",
                     f"{name}:sources_used",
                 )
@@ -774,7 +774,7 @@ def audit(run_dir: str | Path) -> dict[str, Any]:
         check_entry(path, meta, meta_error),
         check_isolation(path, meta),
         check_interview(path, meta),
-        check_roles(path, meta),
+        check_stages(path, meta),
         check_output(path, meta),
     ]
 
@@ -808,7 +808,7 @@ def audit(run_dir: str | Path) -> dict[str, Any]:
 # 这五项检查的对象是 audit 的输出，而不是运行记录。它们保证一件事：**审计结论
 # 永远能把问题定位到具体文件**。评测就是拿这五项跑 evals/golden 下的夹具。
 
-CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效"]
+CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效"]
 CONTRACT_IDS = ["A1", "A2", "A3", "A4", "A5"]
 VALID_STATUS = {"pass", "fail", "skip"}
 VERDICT_CHECKS = ("schema", "consistent", "localisable", "explained", "contracts")

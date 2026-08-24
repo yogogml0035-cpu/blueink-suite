@@ -27,7 +27,7 @@
     },
     {
       "id": "A4",
-      "name": "责任隔离",
+      "name": "阶段边界",
       "status": "fail",
       "detail": "写作回执缺 deviations 字段——未申报的偏离是最难定位的一类问题",
       "evidence": [

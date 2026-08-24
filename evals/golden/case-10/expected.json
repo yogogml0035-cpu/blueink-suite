@@ -27,7 +27,7 @@
     },
     {
       "id": "A4",
-      "name": "责任隔离",
+      "name": "阶段边界",
       "status": "pass",
       "detail": "通过",
       "evidence": []
@@ -36,7 +36,7 @@
       "id": "A5",
       "name": "输出有效",
       "status": "fail",
-      "detail": "来源清单里出现没有被任何角色打开过的文件：05-成品参考/新闻稿/经营类/只在候选里出现过.md（检索候选不算读过——retrieve 不返回全文）",
+      "detail": "来源清单里出现没有被任何阶段打开过的文件：05-成品参考/新闻稿/经营类/只在候选里出现过.md（检索候选不算读过——retrieve 不返回全文）",
       "evidence": [
         "verify.json:sources_used"
       ]

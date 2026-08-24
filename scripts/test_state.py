@@ -552,7 +552,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
     expect_raises("附件给目录时直接拒绝", workspace.WorkspaceError,
                   run_record.register_attachments, [str(outside)])
     # --project 与 --json 在全局位置和子命令位置都必须生效。一个只在某个位置生效的
-    # 参数等于一个会随机失败的参数——子智能体被告知"加 --json"，它自然写在后面。
+    # 参数等于一个会随机失败的参数——阶段指导写着"加 --json"，调用时自然写在后面。
     import subprocess as _sp
     _entry = str(Path(__file__).resolve().parent / "blueink.py")
     for _label, _argv in (("全局位置", ["--project", str(project), "--json", "status"]),
@@ -672,7 +672,7 @@ def test_task_attachments(tmp: Path, project: Path) -> None:
     check("写作者读运行目录内的自身输入不判越权", a4["status"] != "fail", str(a4))
 
     # A2：运行目录内的上游回执不算越界。策略师读 evidence.json、核验员读
-    # program.json、反方读 draft.md 都是编排协议规定的正常流程；判它越界会让
+    # program.json、红队阶段读 draft.md 都是阶段执行协议规定的正常流程；判它越界会让
     # **每一次合规运行**都会在 A2 上违约。
     (run_dir / "evidence.json").write_text(json.dumps({
         "role": "evidence-researcher", "run_id": "A-writer", "task_id": "T1", "status": "ok",

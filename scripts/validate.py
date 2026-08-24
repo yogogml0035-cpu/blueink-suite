@@ -5,12 +5,12 @@
 目录名对不对）。这里检查的是**本技能特有的、一旦破掉就会静默失效的东西**：
 
 - 入口是否真的机械关闭了模型自动调用（散文声明不算）；
-- 六个角色契约是否都在，写作者是否真的没有检索工具；
+- 根级 ``agents/`` 是否不存在，六份阶段指导是否完整；
 - 文档里引用的文件是否真的存在（断链的"按需读取"等于没有那一节）；
 - 技能本体是否混进了品牌语料或绝对路径（技能必须能整目录复制给另一位老师）；
 - 五项验收契约的名称有没有被悄悄改掉；
 - 复审日期是否已经越过声明的复审周期；
-- 任务单的必填字段在《编排协议》与 assets 模板两处是否都还在（发散时后写的那份会静默失效）；
+- 单智能体阶段协议是否明确共享上下文、禁止 Agent 调度并保留阶段产物；
 - `evolve --correct` 的落点标题是否还在，以及它有没有跑回 `SKILL.md`（首读层是方法论）；
 - `blueink.py` 的每个参数是否在文档里出现过（**没被任何文档提到的参数等于运行时发现不了的能力**）。
 
@@ -30,25 +30,22 @@ from datetime import date
 from pathlib import Path
 
 # 五项验收契约的名称。改名等于换掉一项验收标准，必须显式。
-CONTRACTS = ("入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效")
+CONTRACTS = ("入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效")
 
-ROLES = (
-    "evidence-researcher", "editorial-strategist", "professional-writer",
-    "source-verifier", "editorial-adversary", "feedback-attributor",
-)
-
-# 写作者必须拿不到检索工具——写作阶段重新翻库会让"取舍问题"和"表达问题"永久混在一起
-RETRIEVAL_TOOLS = ("Grep", "Glob", "WebSearch", "WebFetch", "Bash", "PowerShell")
+STAGES = {
+    "evidence-research": ("证据研究阶段", "evidence-researcher"),
+    "editorial-strategy": ("编辑策略阶段", "editorial-strategist"),
+    "writing": ("成稿阶段", "professional-writer"),
+    "source-verification": ("来源核验阶段", "source-verifier"),
+    "editorial-red-team": ("编辑红队阶段", "editorial-adversary"),
+    "feedback-attribution": ("反馈归因阶段", "feedback-attributor"),
+}
 
 CLAUDE_SKILL_FIELDS = {
     "name", "description", "when_to_use", "argument-hint", "arguments",
     "disable-model-invocation", "user-invocable", "allowed-tools", "disallowed-tools",
     "model", "effort", "context", "agent", "background", "hooks", "paths", "shell",
     "metadata", "license", "compatibility",
-}
-CLAUDE_AGENT_FIELDS = {
-    "name", "description", "model", "effort", "maxTurns", "tools", "disallowedTools",
-    "skills", "memory", "background", "isolation",
 }
 
 
@@ -120,83 +117,63 @@ def check(root: Path) -> list[str]:
     if (root / "AGENTS.md").exists():
         problems.append("仍有 AGENTS.md——当前包声明只适配 Claude Code，不再维护跨工具侧门")
 
-    # --- 角色契约 ---
+    # --- 单智能体阶段契约 ---
     agents = root / "agents"
-    if not agents.is_dir():
-        problems.append("缺 agents/ 目录")
-    else:
-        present = {p.stem for p in agents.glob("*.md")}
-        for role in ROLES:
-            if role not in present:
-                problems.append(f"缺角色契约：agents/{role}.md")
-        writer = agents / "professional-writer.md"
-        if writer.is_file():
-            meta, _ = frontmatter(writer)
-            tools = meta.get("tools", "")
-            bad = [t for t in RETRIEVAL_TOOLS if t in tools]
-            if bad:
-                problems.append(
-                    f"写作者被授予了检索工具（{'、'.join(bad)}）——"
-                    f"写作阶段重新翻库会让取舍问题与表达问题无法区分"
-                )
-        for role in ROLES:
-            path = agents / f"{role}.md"
-            if not path.is_file():
-                continue
-            meta, _ = frontmatter(path)
-            if not meta.get("description"):
-                problems.append(f"agents/{role}.md 缺 description")
-            if meta.get("name") != role:
-                problems.append(
-                    f"agents/{role}.md 的 name 应为 {role}，由插件命名空间生成"
-                    f" blueink-suite:{role}；当前是 {meta.get('name')}"
-                )
-            unknown = sorted(set(meta) - CLAUDE_AGENT_FIELDS)
-            if unknown:
-                problems.append(
-                    f"agents/{role}.md 含 Claude Code 未声明的 frontmatter 字段：{unknown}"
-                )
-            if "tools" not in meta:
-                problems.append(
-                    f"agents/{role}.md 缺 tools —— 没有工具白名单时角色边界只能靠自律"
-                )
-            elif "Write" not in re.split(r"[\s,]+", meta["tools"]):
-                problems.append(
-                    f"agents/{role}.md 缺 Write —— 角色被要求落回执，却没有原生写入能力"
-                )
-            if meta.get("background") != "false":
-                problems.append(
-                    f"agents/{role}.md 必须显式 background: false —— "
-                    "回执是串行依赖，不能把宿主默认值当成前台保证"
-                )
+    if agents.exists():
+        problems.append("仍有根级 agents/——Claude Code 会把它注册成子智能体，单智能体架构不成立")
 
-    protocol = root / "references" / "orchestration-protocol.md"
-    if protocol.is_file():
+    stage_root = root / "references" / "stages"
+    for stage, (title, role_id) in STAGES.items():
+        path = stage_root / f"{stage}.md"
+        if not path.is_file():
+            problems.append(f"缺阶段指导：references/stages/{stage}.md")
+            continue
+        meta, body = frontmatter(path)
+        if meta:
+            problems.append(
+                f"references/stages/{stage}.md 仍含 Agent frontmatter——阶段指导不得注册成 Agent"
+            )
+        if f"# {title}" not in body:
+            problems.append(f"references/stages/{stage}.md 缺标题「{title}」")
+        if "## 阶段产物" not in body:
+            problems.append(f"references/stages/{stage}.md 缺「阶段产物」契约")
+        if f'"role": "{role_id}"' not in body:
+            problems.append(
+                f"references/stages/{stage}.md 的 role 兼容标识应为 {role_id}"
+            )
+
+    for stage in (
+        "editorial-strategy", "writing", "source-verification",
+        "editorial-red-team", "feedback-attribution",
+    ):
+        path = stage_root / f"{stage}.md"
+        if path.is_file() and "本阶段不得调用检索或搜索工具" not in path.read_text(encoding="utf-8"):
+            problems.append(
+                f"references/stages/{stage}.md 缺检索禁止项——共享工具会让阶段边界退化"
+            )
+
+    protocol = root / "references" / "stage-execution-protocol.md"
+    if not protocol.is_file():
+        problems.append("缺 references/stage-execution-protocol.md")
+    else:
         protocol_text = protocol.read_text(encoding="utf-8")
-        if "`run_in_background: false`" not in protocol_text:
-            problems.append(
-                "编排协议没有显式要求 run_in_background: false —— 只写“前台”不能约束 Agent 工具"
-            )
-        if "不许用 Bash 轮询伪装成同步" not in protocol_text:
-            problems.append(
-                "编排协议缺异步降级规则 —— 子智能体异常时可能再次用 sleep 轮询把故障藏住"
-            )
-        if not all(
-            marker in protocol_text
-            for marker in (
-                "ANTHROPIC_BASE_URL", "output_config.format",
-                "Extra inputs are not permitted", "--agent",
-            )
+        for marker, message in (
+            ("不得调用 Agent、Task、子智能体或 `claude --agent`", "协议缺禁止多智能体调度的硬约束"),
+            ("共享在同一个上下文中", "协议没有声明上下文与工具共享"),
+            ("不声称来源核验或编辑红队是独立评审", "协议仍可能把同一执行者伪装成独立评审"),
+            ("不是上下文清除或权限隔离", "协议没有区分输入合同与真实权限隔离"),
         ):
-            problems.append(
-                "编排协议缺自定义中转兼容降级 —— Bedrock 拒绝结构化参数时会重复卡在原生 Agent"
-            )
+            if marker not in protocol_text:
+                problems.append(message)
+        for forbidden in ("subagent_type", "run_in_background", "ANTHROPIC_BASE_URL", "output_config.format"):
+            if forbidden in protocol_text:
+                problems.append(f"单智能体协议仍含多智能体运行路径：{forbidden}")
 
     # --- 文档断链 ---
     # 只检查看起来是"技能内相对路径"的引用。文档里也会出现知识库里的路径
     # （例如知识库里混进来的技能包模板），那些不该被当成断链——判据是它前面还有别的目录层级。
     pattern = re.compile(
-        r"(?<![A-Za-z0-9_\-./])((?:references|agents|assets|scripts|evals|commands)/[A-Za-z0-9_\-./]+)`"
+        r"(?<![A-Za-z0-9_\-./])((?:references|assets|scripts|evals|commands)/[A-Za-z0-9_\-./]+)`"
     )
     for doc in sorted(root.rglob("*.md")):
         if ".blueink" in doc.parts:
@@ -231,7 +208,7 @@ def check(root: Path) -> list[str]:
                 problems.append(f"评测规格 JSON 无法解析：{exc}")
 
     problems += review_due(root)
-    problems += task_order_fields(root)
+    problems += stage_contract_fields(root)
     problems += workspace_template_matches(root)
     problems += claude_only_distribution(root)
     problems += product_voice(root)
@@ -261,7 +238,7 @@ def workspace_template_matches(root: Path) -> list[str]:
 def claude_only_distribution(root: Path) -> list[str]:
     """安装说明与脚本不得继续承诺其它宿主，也不得带作者机器路径。"""
     problems: list[str] = []
-    active = [root / "README.md", root / "SKILL.md", *sorted((root / "references").glob("*.md")),
+    active = [root / "README.md", root / "SKILL.md", *sorted((root / "references").rglob("*.md")),
               *sorted((root / "assets").glob("*.md"))]
     joined = "\n".join(p.read_text(encoding="utf-8") for p in active if p.is_file())
     for forbidden in ("/Users/", "/tmp/", "~/.codex/skills", "~/.agents/skills", "Codex CLI"):
@@ -292,8 +269,7 @@ def product_voice(root: Path) -> list[str]:
     docs = [
         root / "SKILL.md", root / "README.md", root / "CHANGELOG.md",
         root / "DESIGN_NOTES.md", root / "DECISIONS.md", root / "EVOLUTION.md",
-        *sorted((root / "references").glob("*.md")),
-        *sorted((root / "agents").glob("*.md")),
+        *sorted((root / "references").rglob("*.md")),
         *sorted((root / "assets").glob("*.md")),
         *sorted((root / "evals").glob("*.md")),
     ]
@@ -341,7 +317,7 @@ def documented_flags(root: Path) -> list[str]:
                         and arg.value.startswith("--"):
                     flags.add(arg.value)
 
-    globs = ("*.md", "references/*.md", "agents/*.md", "assets/*.md",
+    globs = ("*.md", "references/**/*.md", "assets/*.md",
              "commands/*.md", "evals/*.md")
     docs = "\n".join(
         path.read_text(encoding="utf-8")
@@ -355,10 +331,7 @@ def documented_flags(root: Path) -> list[str]:
 
 
 def correction_target(root: Path) -> list[str]:
-    """`evolve.py --correct` 追加纠正的目标标题必须还在。
-
-    `--correct` 按标题定位反馈区；目标缺失会让反馈落到错误文档位置。
-    """
+    """首读 Gotchas 与 ``evolve.py --correct`` 的详细落点必须同时存在。"""
     target = root / "references" / "troubleshooting.md"
     if not target.is_file():
         return ["缺 references/troubleshooting.md——evolve --correct 没有落点"]
@@ -366,36 +339,35 @@ def correction_target(root: Path) -> list[str]:
         return ["references/troubleshooting.md 缺 `## Gotchas` 标题——"
                 "evolve --correct 会改在文件末尾自己造一节，且不报错"]
     skill = root / "SKILL.md"
-    if skill.is_file() and re.search(
-            r"^#{1,6}[ \t]+Gotchas\b", skill.read_text(encoding="utf-8"), re.M | re.I):
-        return ["SKILL.md 又出现了 `## Gotchas` 标题——首读层是方法论，"
-                "使用中捕获的具体现象应落在 references/troubleshooting.md"]
+    if not skill.is_file():
+        return ["缺 SKILL.md"]
+    skill_text = skill.read_text(encoding="utf-8")
+    if not re.search(r"^#{1,6}[ \t]+Gotchas\b", skill_text, re.M | re.I):
+        return ["SKILL.md 缺 `## Gotchas`——首读层没有保留最关键的环境反直觉事实"]
+    if "references/troubleshooting.md" not in skill_text:
+        return ["SKILL.md 的 Gotchas 没有路由到 references/troubleshooting.md"]
     return []
 
 
-# 任务单的必填字段。子智能体拿不到其中任何一个，就只能在项目目录里逐个猜路径——
-# 缺了它，一个策略师实例可能连试六个不存在的路径才放弃。字段写在两个文件里
-# （《编排协议》的示例和 assets 模板），两处发散时后写的那一份会静默失效。
-TASK_ORDER_FIELDS = (
-    "run_id", "task_id", "role", "brand", "kb_root", "skill_root",
-    "project_root", "python", "cli", "expect",
-)
+# 阶段切换卡只负责把同一智能体的注意力收束到当前责任，不是委托任务单。
+STAGE_CARD_FIELDS = ("stage", "run_id", "guide", "inputs", "forbidden", "expect")
 
 
-def task_order_fields(root: Path) -> list[str]:
-    """《编排协议》的任务单示例与 assets 模板必须都声明全部必填字段。"""
-    problems: list[str] = []
-    for rel in ("references/orchestration-protocol.md", "assets/task-order-template.md"):
-        path = root / rel
-        if not path.is_file():
-            problems.append(f"缺 {rel}")
-            continue
-        text = path.read_text(encoding="utf-8")
-        for field in TASK_ORDER_FIELDS:
-            if f"{field}:" not in text:
-                problems.append(
-                    f"{rel} 的任务单里缺 {field}——子智能体拿不到它就只能猜路径"
-                )
+def stage_contract_fields(root: Path) -> list[str]:
+    """阶段协议必须声明切换卡字段，并能路由到全部阶段指导。"""
+    rel = "references/stage-execution-protocol.md"
+    path = root / rel
+    if not path.is_file():
+        return [f"缺 {rel}"]
+    text = path.read_text(encoding="utf-8")
+    problems = [
+        f"{rel} 的阶段切换卡缺 {field}"
+        for field in STAGE_CARD_FIELDS if f"{field}:" not in text
+    ]
+    for stage in STAGES:
+        guide = f"references/stages/{stage}.md"
+        if guide not in text:
+            problems.append(f"{rel} 没有路由到 {guide}")
     return problems
 
 

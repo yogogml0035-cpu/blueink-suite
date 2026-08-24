@@ -162,7 +162,7 @@ def add_candidates(
     candidates: list[dict[str, Any]], *, brand: str | None = None,
     run_id: str | None = None, start=None,
 ) -> dict[str, Any]:
-    """把反馈归因员的候选写入记忆库。``methodology`` 级分流到单独文件。"""
+    """把反馈归因阶段的候选写入记忆库。``methodology`` 级分流到单独文件。"""
     if brand is None:
         ws = workspace.load(start)
         brand = str(ws["brand"])

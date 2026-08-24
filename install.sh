@@ -2,8 +2,8 @@
 # blueink-suite · Claude Code / macOS 直装脚本
 #
 # 推荐优先使用 README 里的 Claude Code marketplace 安装。这个脚本只作为本地源码
-# 直装入口：把完整插件放到 ~/.claude/skills/blueink-suite。agents/ 由 Claude Code
-# 从插件根自动发现，不再复制到全局 ~/.claude/agents/，避免多个版本留下重复角色。
+# 直装入口：把完整插件放到 ~/.claude/skills/blueink-suite。运行时只有一个 Skill，
+# 六份阶段指导从 references/stages/ 按需读取，不注册全局或插件子智能体。
 
 set -eu
 
@@ -32,7 +32,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 2
 fi
 
-for required in SKILL.md .claude-plugin/plugin.json agents references scripts; do
+for required in SKILL.md .claude-plugin/plugin.json references references/stages scripts; do
     if [ ! -e "${SRC}/${required}" ]; then
         echo "源目录不完整，缺 ${required}：${SRC}" >&2
         exit 1
@@ -83,5 +83,5 @@ fi
 mv "${STAGE}/${SKILL_NAME}" "${TARGET}"
 
 echo "✓ 已安装 Claude Code 插件：${TARGET}"
-echo "  六个子智能体由插件根 agents/ 自动发现，没有写入全局 ~/.claude/agents/。"
+echo "  单智能体运行；六份阶段指导位于 references/stages/。"
 echo "  新开 Claude Code 会话后输入：/blueink-suite <你的需求>"

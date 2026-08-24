@@ -1,7 +1,7 @@
 # blueink-suite · Claude Code / Windows 直装脚本
 #
 # 推荐优先使用 README 里的 Claude Code marketplace 安装。本脚本把完整插件放到
-# $HOME\.claude\skills\blueink-suite；agents\ 由 Claude Code 从插件根自动发现。
+# $HOME\.claude\skills\blueink-suite；六份阶段指导从 references\stages\ 按需读取。
 
 [CmdletBinding()]
 param(
@@ -15,7 +15,7 @@ $Src = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TargetRoot = Join-Path $HOME '.claude\skills'
 $Target = Join-Path $TargetRoot $SkillName
 
-foreach ($required in @('SKILL.md', '.claude-plugin\plugin.json', 'agents', 'references', 'scripts')) {
+foreach ($required in @('SKILL.md', '.claude-plugin\plugin.json', 'references', 'references\stages', 'scripts')) {
     if (-not (Test-Path (Join-Path $Src $required))) {
         throw "源目录不完整，缺 $required：$Src"
     }
@@ -71,5 +71,5 @@ try {
 }
 
 Write-Host "✓ 已安装 Claude Code 插件：$Target"
-Write-Host '  六个子智能体由插件根 agents\ 自动发现，没有写入全局 .claude\agents\。'
+Write-Host '  单智能体运行；六份阶段指导位于 references\stages\。'
 Write-Host '  新开 Claude Code 会话后输入：/blueink-suite <你的需求>'

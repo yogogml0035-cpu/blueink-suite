@@ -27,7 +27,7 @@
     },
     {
       "id": "A4",
-      "name": "责任隔离",
+      "name": "阶段边界",
       "status": "pass",
       "detail": "通过",
       "evidence": []

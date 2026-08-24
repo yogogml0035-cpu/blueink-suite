@@ -93,9 +93,9 @@ BOUNDARY_KEYWORDS = ("改稿编排", "版本回退", "Word 排版", "品类认�
 FORBIDDEN_SUBCOMMANDS = {"rework", "rollback", "revert", "revise", "restore", "version"}
 
 # 五项验收契约的名称与顺序。审计器与评测规格必须一致，否则某项契约可以被悄悄改名。
-CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "责任隔离", "输出有效"]
+CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效"]
 
-DOC_GLOBS = ("*.md", "references/*.md", "evals/*.md", "agents/*.md", "commands/*.md")
+DOC_GLOBS = ("*.md", "references/**/*.md", "evals/*.md", "commands/*.md")
 
 # 版本说明与使用反馈证据不是运行契约，项数一致性只核对产品与评测文档。
 COUNT_EXEMPT_DOCS = {"CHANGELOG.md", "EVOLUTION.md"}
@@ -660,28 +660,28 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         "老师会开始敷衍，而敷衍的回答比没有回答更危险",
     ),
     (
-        "agent-background",
-        "agents/evidence-researcher.md",
-        "background: false",
-        "background: true",
+        "agent-dispatch",
+        "references/stage-execution-protocol.md",
+        "**不得调用 Agent、Task、子智能体或 `claude --agent`。**",
+        "**允许在必要时调用 Agent、Task 或子智能体。**",
         ["scripts/validate.py"],
-        "取证角色重新允许后台默认：关键回执变成异步依赖，主智能体可能轮询空文件并让界面假死",
+        "阶段协议重新允许 Agent 调度：中转站不兼容问题会重新进入运行主干",
     ),
     (
-        "evidence-write",
-        "agents/evidence-researcher.md",
-        "tools: Read, Write, Grep, Glob, Bash, PowerShell, WebFetch, WebSearch",
-        "tools: Read, Grep, Glob, Bash, PowerShell, WebFetch, WebSearch",
+        "stage-search-boundary",
+        "references/stages/writing.md",
+        "宿主仍可能显示检索工具，但**本阶段不得调用检索或搜索工具**。",
+        "宿主显示检索工具时，本阶段可以重新检索补充素材。",
         ["scripts/validate.py"],
-        "取证角色被要求生成 evidence.json 却失去原生 Write：任务契约与可用能力不再闭合",
+        "成稿阶段重新允许检索：素材取舍与表达执行再次混在一起",
     ),
     (
-        "provider-fallback",
-        "references/orchestration-protocol.md",
-        "`output_config.format` 与 `Extra inputs are not permitted`",
-        "`output_config.unknown` 与 `Extra inputs are not permitted`",
+        "independence-honesty",
+        "references/stage-execution-protocol.md",
+        "不声称来源核验或编辑红队是独立评审",
+        "来源核验和编辑红队是独立评审",
         ["scripts/validate.py"],
-        "自定义中转拒绝 Agent 结构化参数时没有 CLI 角色降级，主流程只会在同一错误上反复等待",
+        "同一上下文里的复核被重新包装成独立评审，能力边界变成虚假承诺",
     ),
 ]
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "本次写作程序",
-  "description": "写作子智能体的唯一输入。每次运行都必须存在，落在 .blueink/runs/<run_id>/program.json。它只对这一次任务有效——不沉淀成模板，不进化成新规则。",
+  "description": "成稿阶段的唯一输入。每次运行都必须存在，落在 .blueink/runs/<run_id>/program.json。它只对这一次任务有效——不沉淀成模板，不进化成新规则。",
   "type": "object",
   "required": [
     "run_id", "brand", "category", "communication", "delivery_contract",
@@ -79,7 +79,7 @@
     "style_refs": {"type": "array", "items": {"type": "string"},
       "description": "风格样本路径。只能是终稿或成品参考，不能是初稿"},
     "assumptions": {"type": "array", "items": {"type": "string"},
-      "description": "老师未明确确认、由主智能体裁决的判断。必须显式列出"},
+      "description": "老师未明确确认、由当前智能体裁决的判断。必须显式列出"},
     "ab": {"type": "boolean", "description": "是否生成 A/B 两稿"},
     "ab_variable": {"type": "string",
       "description": "A/B 只在哪一个关键变量上不同：切口 / 信息重心 / 观点层级 / 读者关系"}

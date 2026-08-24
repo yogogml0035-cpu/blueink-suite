@@ -2,10 +2,10 @@
 """BlueInk 的唯一命令入口：确定性状态与记账层。
 
 技能正文是散文，靠模型自己记住"先跑哪个脚本、再跑哪个"是不可靠的。所以确定性
-工作全部收在这一个入口里：主智能体只需要记住 ``blueink.py <子命令>``。
+工作全部收在这一个入口里：当前智能体只需要记住 ``blueink.py <子命令>``。
 
 **这不是一条管线。** 它不按顺序驱动流程，也没有"跑完就出稿"的命令。真正的流程由
-主智能体按访谈结果和证据缺口分支；这里只负责那些不该交给模型判断的事——路径归属、
+当前智能体按访谈结果和证据缺口分支；这里只负责那些不该交给模型判断的事——路径归属、
 哈希、增量索引、URL 白名单、运行记账、置信度算术、契约审计。
 
 子命令：
@@ -24,10 +24,10 @@
     audit        五项验收契约的机械审计
     doctor       一条命令看清当前状态
 
-所有命令都支持 ``--json`` 输出，方便子智能体直接消费。
+所有命令都支持 ``--json`` 输出，方便当前阶段直接消费。
 
 这里**没有**改稿编排与版本回退命令，这是边界不是遗漏：一次生成内部的回退由回执
-``status`` 驱动（见《编排协议》标准流程），老师后续的修改意见只进入学习外循环。
+``status`` 驱动（见《单智能体阶段执行协议》标准主干），老师后续的修改意见只进入学习外循环。
 "改稿退到哪一层"是另一个产品，第一版不做。self_check.py --claims 会双向核对这份
 子命令清单与文档，多一个未声明的命令就判失败。
 """
@@ -91,7 +91,7 @@ def cmd_bind(args: argparse.Namespace) -> int:
 def cmd_check_brand(args: argparse.Namespace) -> int:
     """本次要写的品牌与当前绑定的知识库是否匹配。
 
-    主智能体在访谈里确认了本次品牌之后调这一条，而不是等到取证时才发现检索命中的
+    当前智能体在访谈里确认了本次品牌之后调这一条，而不是等到取证时才发现检索命中的
     全是别家客户的稿件。未绑定不是错误——它只说明本次要么先绑定，要么以附件为准。
     """
     if not workspace.is_bound(args.project):
@@ -567,9 +567,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="BlueInk 单命令入口：绑定、索引、检索、运行记录、记忆与审计",
     )
     parser.add_argument("--project", help="项目根目录（默认从当前目录向上找 .blueink/）")
-    parser.add_argument("--json", action="store_true", help="以 JSON 输出，便于子智能体消费")
+    parser.add_argument("--json", action="store_true", help="以 JSON 输出，便于当前阶段消费")
     # 同一组全局参数也挂到每个子命令上，这样 `--json audit …` 和 `audit --json` 都能用。
-    # 不做这一步的代价是真实的：子智能体被告知"加 --json 就能拿结构化输出"，它自然
+    # 不做这一步的代价是真实的：阶段指导要求"加 --json 就能拿结构化输出"，调用时自然
     # 会写在子命令后面，然后拿到一句 argparse 的 "unrecognized arguments: --json"——
     # 一个只在某个位置生效的参数，等于一个会随机失败的参数。
     # SUPPRESS 是关键：没传时子解析器不写这个键，于是不会把全局传进来的值清成 False。
@@ -577,7 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--project", default=argparse.SUPPRESS,
                         help="项目根目录（默认从当前目录向上找 .blueink/）")
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                        help="以 JSON 输出，便于子智能体消费")
+                        help="以 JSON 输出，便于当前阶段消费")
     sub = parser.add_subparsers(dest="command", required=True, parser_class=(
         lambda **kw: argparse.ArgumentParser(parents=[common], **kw)))
 
@@ -663,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["list", "add", "confirm", "counter", "cancel", "reinforce", "retire", "decay"],
     )
     p.add_argument("--id", help="记忆 id")
-    p.add_argument("--file", help="反馈归因员回执 feedback.json")
+    p.add_argument("--file", help="反馈归因阶段回执 feedback.json")
     p.add_argument("--note", help="一句话说明")
     p.add_argument("--narrow", help="给旧结论补一条不适用范围")
     p.add_argument("--scope", choices=list(memory_mod.VALID_SCOPES))
