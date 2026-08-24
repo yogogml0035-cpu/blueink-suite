@@ -84,8 +84,7 @@ OWN_SCRIPTS = {
     "workspace.py",
 }
 
-# 方法论第八节声明的边界。每一条都必须同时出现在《方法论内核》与设计说明中，
-# 少一处就说明其中一份维护文档已经开始许诺技能做不到（或不该做）的事。
+# 产品声明的边界。每一条都必须出现在设计说明中，避免维护文档许诺技能做不到的事。
 BOUNDARY_KEYWORDS = ("改稿编排", "版本回退", "Word 排版", "品类认证", "自然语言自动触发")
 
 # 越界能力的命令名。这些名字一旦出现在子命令表里，就说明"能力边界是文案生成"
@@ -470,16 +469,14 @@ def _claim_subcommands(root: Path, docs: dict[Path, str], res: Result) -> None:
 
 
 def _claim_boundaries(root: Path, docs: dict[Path, str], res: Result) -> None:
-    """边界清单必须同时出现在《方法论内核》与设计说明，一处不缺。"""
-    core = docs.get(root / "references" / "methodology-core.md", "")
+    """边界清单必须出现在设计说明，SKILL 必须保留能力边界入口。"""
     design = docs.get(root / "DESIGN_NOTES.md", "")
     skill = docs.get(root / "SKILL.md", "")
     res.check(
-        bool(core and design and skill),
-        "读不到 methodology-core.md / DESIGN_NOTES.md / SKILL.md",
+        bool(design and skill),
+        "读不到 DESIGN_NOTES.md / SKILL.md",
     )
     for word in BOUNDARY_KEYWORDS:
-        res.check(word in core, f"《方法论内核》边界节缺「{word}」")
         res.check(word in design, f"DESIGN_NOTES.md 边界节缺「{word}」")
     res.check(
         "能力边界" in skill and "文案生成" in skill,
@@ -553,9 +550,10 @@ def _claim_contract_names(root: Path, docs: dict[Path, str], res: Result) -> Non
     """五项契约的名称与顺序：审计器代码与评测规格必须一致。"""
     audit_src = (root / "scripts" / "audit.py").read_text(encoding="utf-8")
     found = re.findall(r'Check\("A(\d)", "([^"]+)"\)', audit_src)
+    unique = {number: name for number, name in found}
     res.check(
-        [name for _, name in sorted(found)] == CONTRACT_NAMES,
-        f"审计器契约名与预期不符：{[n for _, n in sorted(found)]} != {CONTRACT_NAMES}",
+        [name for _, name in sorted(unique.items())] == CONTRACT_NAMES,
+        f"审计器契约名与预期不符：{[n for _, n in sorted(unique.items())]} != {CONTRACT_NAMES}",
     )
     spec = docs.get(root / "evals" / "blueink-suite.eval.md", "")
     for name in CONTRACT_NAMES:
@@ -661,35 +659,35 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     ),
     (
         "agent-dispatch",
-        "references/stage-execution-protocol.md",
-        "**运行期间只使用当前 `/blueink-suite` 会话。**",
-        "**运行期间可以调用 Agent、Task 或子智能体。**",
+        "SKILL.md",
+        "不调用 Agent、Task、后台智能体、独立 `claude` 进程或其他模型会话。",
+        "可以调用 Agent、Task、后台智能体或独立模型会话。",
         ["scripts/validate.py"],
-        "阶段协议允许外部 Agent 调度：单会话运行合同失效",
+        "根入口允许外部 Agent 调度：单智能体运行合同失效",
     ),
     (
         "stage-search-boundary",
-        "references/stages/writing.md",
-        "宿主仍可能显示检索工具，但**本阶段不得调用检索或搜索工具**。",
-        "宿主显示检索工具时，本阶段可以重新检索补充素材。",
+        "references/generate.md",
+        "不在写作时重新检索、换主线或补事实；",
+        "写作时可以重新检索、换主线或补事实；",
         ["scripts/validate.py"],
-        "成稿阶段重新允许检索：素材取舍与表达执行再次混在一起",
+        "成稿时重新允许检索：素材取舍与表达执行再次混在一起",
     ),
     (
         "independence-honesty",
-        "references/stage-execution-protocol.md",
-        "来源核验与编辑红队属于同一会话内的受限输入复核",
-        "来源核验和编辑红队是独立评审",
+        "references/generate.md",
+        "这不是独立审查。只输出问题句与来源对应，不重写全文。",
+        "这是独立审查。可以直接重写全文。",
         ["scripts/validate.py"],
         "同一上下文里的复核被重新包装成独立评审，能力边界变成虚假承诺",
     ),
     (
         "product-voice",
-        "references/stage-execution-protocol.md",
-        "## 二 · 运行能力边界",
-        "## 二 · 什么被保留，什么不再声称",
+        "references/generate.md",
+        "# 默认生成快线",
+        "# 从旧阶段架构迁移到默认生成快线",
         ["scripts/validate.py"],
-        "用户可见阶段协议混入实现变化说明：产品表达不再是当前时态",
+        "用户可见运行指导混入实现变化说明：产品表达不再是当前时态",
     ),
 ]
 

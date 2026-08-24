@@ -754,6 +754,211 @@ def check_output(run_dir: Path, meta: Any) -> Check:
 # --- 汇总 -------------------------------------------------------------------
 
 
+FAST_REQUIRED_BY_MODE = {
+    "生成": [("run.json",), ("draft.md",), ("verify.json",), ("delivery.md",)],
+    "绑定": [("run.json",)],
+    "学习": [("run.json",)],
+    "定位": [("run.json",)],
+}
+
+LEGACY_GENERATION_FILES = {
+    "meta.json", "interview.json", "evidence.json", "strategy.json", "program.json",
+    "write-receipt.json", "adversary.json",
+}
+
+
+def _fast_source_allowed(ref: str, record: dict[str, Any]) -> bool:
+    if ref.startswith(("http://", "https://")):
+        return True
+    kb_root = str(record.get("kb_root") or "")
+    raw = Path(ref).expanduser()
+    resolved = _real(str((Path(kb_root) / raw) if kb_root and not raw.is_absolute() else raw))
+    attachments = {_real(path) for path in run_record.attachment_paths(record)}
+    if resolved in attachments:
+        return True
+    return bool(kb_root) and workspace.within(resolved, kb_root)
+
+
+def _fast_check_entry(record: Any, error: str | None) -> Check:
+    check = Check("A1", "入口唯一")
+    if error:
+        check.fail(error, "run.json")
+        return check
+    if not isinstance(record, dict):
+        check.fail("缺 run.json——没有新版运行记录", "run.json")
+        return check
+    if record.get("started_via") not in ENTRY_ALIASES:
+        check.fail(f"started_via 不是受支持的显式入口 {ENTRY_ALIASES}", "run.json:started_via")
+    if not str(record.get("run_id") or ""):
+        check.fail("run.json 缺 run_id", "run.json:run_id")
+    if record.get("schema_version") != 4:
+        check.fail("run.json.schema_version 必须为 4", "run.json:schema_version")
+    return check
+
+
+def _fast_check_isolation(record: Any, verify: Any) -> Check:
+    check = Check("A2", "单品牌隔离")
+    if not isinstance(record, dict):
+        check.fail("run.json 顶层不是对象", "run.json")
+        return check
+    for index, fact in enumerate(record.get("facts") or []):
+        if not isinstance(fact, dict):
+            check.fail(f"facts[{index}] 不是对象", f"run.json:facts[{index}]")
+            continue
+        source = str(fact.get("source_path") or "")
+        if not source or not _fast_source_allowed(source, record):
+            check.fail(f"事实来源未登记或越过绑定知识库：{source}", f"run.json:facts[{index}]")
+    if isinstance(verify, dict):
+        for index, item in enumerate(verify.get("sources_used") or []):
+            ref = str((item or {}).get("path_or_url") or "") if isinstance(item, dict) else ""
+            if not ref or not _fast_source_allowed(ref, record):
+                check.fail(f"交付来源未登记或越界：{ref}", f"verify.json:sources_used[{index}]")
+        if verify.get("cross_brand"):
+            check.fail("正文存在跨品牌信息", "verify.json:cross_brand")
+    return check
+
+
+def _fast_check_interview(record: Any) -> Check:
+    check = Check("A3", "动态访谈")
+    if not isinstance(record, dict):
+        check.fail("run.json 顶层不是对象", "run.json")
+        return check
+    if str(record.get("mode") or "生成") != "生成":
+        check.skip(f"{record.get('mode')} 模式不要求成稿前方向确认")
+        return check
+    interview = record.get("interview")
+    direction = record.get("direction")
+    rounds = interview.get("rounds") if isinstance(interview, dict) else None
+    if not isinstance(rounds, list) or not rounds:
+        check.fail("生成任务不允许零轮访谈", "run.json:interview.rounds")
+        return check
+    ordinary = 0
+    direction_round = False
+    for index, item in enumerate(rounds, 1):
+        if not isinstance(item, dict):
+            check.fail(f"第 {index} 轮不是对象", f"run.json:interview.rounds[{index - 1}]")
+            continue
+        kind = str(item.get("kind") or "")
+        ordinary += kind != "hard_conflict"
+        direction_round = direction_round or kind == "direction"
+        question = str(item.get("question") or "")
+        answer = str(item.get("answer") or "")
+        if not question.strip() or not answer.strip():
+            check.fail(f"第 {index} 轮缺问题或老师原话", f"run.json:interview.rounds[{index - 1}]")
+        if _question_count(question) > 1:
+            check.fail(f"第 {index} 轮一次问了多个问题", f"run.json:interview.rounds[{index - 1}].question")
+    if ordinary > 2:
+        check.fail("普通生成超过两轮；额外轮次只能是事实或来源 hard_conflict", "run.json:interview.rounds")
+    if rounds and isinstance(rounds[-1], dict) and rounds[-1].get("kind") != "direction":
+        check.fail("生成任务最后一轮不是成稿前方向确认", "run.json:interview.rounds")
+    if not direction_round:
+        check.fail("缺成稿前方向确认轮", "run.json:interview.rounds")
+    if not isinstance(direction, dict) or direction.get("confirmed_by_user") is not True:
+        check.fail("方向没有得到老师明确确认", "run.json:direction.confirmed_by_user")
+    return check
+
+
+def _fast_check_stages(run_dir: Path, record: Any, verify: Any, verify_error: str | None) -> Check:
+    check = Check("A4", "阶段边界")
+    if verify_error:
+        check.fail(verify_error, "verify.json")
+    present = {path.name for path in run_dir.iterdir() if path.is_file()}
+    leaked = sorted(present & LEGACY_GENERATION_FILES)
+    if leaked:
+        check.fail(f"新版运行仍生成旧阶段文件：{'、'.join(leaked)}", leaked[0])
+    if isinstance(record, dict) and str(record.get("mode") or "") == "生成":
+        if record.get("decision") is None or record.get("direction") is None:
+            check.fail("成稿前没有保存方向与编辑决策", "run.json:decision")
+        facts = record.get("facts") or []
+        if len(facts) > 12:
+            check.fail("事实原子超过 12 条", "run.json:facts")
+        for index, fact in enumerate(facts):
+            if not isinstance(fact, dict):
+                continue
+            allowed = fact.get("allowed_strong_words") or []
+            if any(word not in run_record.STRONG_WORDS for word in allowed):
+                check.fail(f"facts[{index}] 含非法强比较词授权", f"run.json:facts[{index}]")
+    if isinstance(verify, dict) and verify.get("role") != "single-agent-verifier":
+        check.fail("verify.json 没有声明同一智能体受限复核", "verify.json:role")
+    return check
+
+
+def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
+    check = Check("A5", "输出有效")
+    if not isinstance(record, dict) or str(record.get("mode") or "生成") != "生成":
+        check.skip("当前模式不产出正文")
+        return check
+    draft = _text(run_dir, "draft.md")
+    if draft is None:
+        check.skip("运行还没成稿（缺 draft.md）")
+        return check
+    allowed_words = {
+        word for fact in (record.get("facts") or []) if isinstance(fact, dict)
+        for word in (fact.get("allowed_strong_words") or [])
+    }
+    for word in run_record.STRONG_WORDS:
+        if word in draft and word not in allowed_words:
+            check.fail(f"正文使用未获来源范围授权的强比较词「{word}」", "draft.md")
+
+    if not isinstance(verify, dict):
+        if _archived(record):
+            check.fail("运行已归档却没有合法 verify.json", "verify.json")
+        else:
+            check.skip("尚未保存核验结论")
+        return check
+    expected = _expected_verdict(verify)
+    if verify.get("verdict") != expected:
+        check.fail(f"核验结论应为「{expected}」", "verify.json:verdict")
+    if not (verify.get("sources_used") or []):
+        check.fail("sources_used 为空", "verify.json:sources_used")
+
+    delivery = _text(run_dir, "delivery.md")
+    if delivery is None:
+        if _archived(record):
+            check.fail("运行已归档却没有 delivery.md", "delivery.md")
+        else:
+            check.skip("运行尚未归档，delivery.md 还未生成")
+    else:
+        if str(verify.get("verdict") or "") not in delivery:
+            check.fail("delivery.md 没有使用 verify.json 的结论", "delivery.md")
+        if "实际来源" not in delivery:
+            check.fail("delivery.md 缺实际来源", "delivery.md")
+        for leak in ("run.json", "verify.json", ".blueink/runs"):
+            if leak in delivery:
+                check.fail(f"交付泄漏技术轨迹：{leak}", "delivery.md")
+                break
+    return check
+
+
+def audit_fast(run_dir: Path) -> dict[str, Any]:
+    record, record_error = _load(run_dir, "run.json")
+    verify, verify_error = _load(run_dir, "verify.json")
+    checks = [
+        _fast_check_entry(record, record_error),
+        _fast_check_isolation(record, verify),
+        _fast_check_interview(record),
+        _fast_check_stages(run_dir, record, verify, verify_error),
+        _fast_check_output(run_dir, record, verify),
+    ]
+    mode = str((record or {}).get("mode") or "生成") if isinstance(record, dict) else "生成"
+    present = {path.name for path in run_dir.iterdir() if path.is_file()}
+    missing = [
+        group[0] for group in FAST_REQUIRED_BY_MODE.get(mode, [])
+        if not any(name in present for name in group)
+    ]
+    failed = [check.id for check in checks if check.status == "fail"]
+    verdict = "violated" if failed else ("incomplete" if missing else "pass")
+    return {
+        "run_id": (record or {}).get("run_id") if isinstance(record, dict) else None,
+        "brand": (record or {}).get("brand") if isinstance(record, dict) else None,
+        "mode": mode,
+        "verdict": verdict,
+        "checks": [check.as_dict() for check in checks],
+        "failed": failed,
+        "missing_artifacts": missing,
+    }
+
+
 def audit(run_dir: str | Path) -> dict[str, Any]:
     """审计一次运行，返回结论字典。"""
     path = Path(run_dir)
@@ -766,6 +971,9 @@ def audit(run_dir: str | Path) -> dict[str, Any]:
             "missing_artifacts": [],
             "error": f"运行记录目录不存在：{path}",
         }
+
+    if (path / "run.json").is_file():
+        return audit_fast(path)
 
     meta, meta_error = _load(path, "meta.json")
     mode = str((meta or {}).get("mode") or "生成") if isinstance(meta, dict) else "生成"

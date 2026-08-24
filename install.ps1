@@ -1,7 +1,7 @@
 # blueink-suite · Claude Code / Windows 直装脚本
 #
 # 推荐优先使用 README 里的 Claude Code marketplace 安装。本脚本把完整插件放到
-# $HOME\.claude\skills\blueink-suite；六份阶段指导从 references\stages\ 按需读取。
+# $HOME\.claude\skills\blueink-suite；默认生成只读取 references\generate.md。
 
 [CmdletBinding()]
 param(
@@ -15,7 +15,7 @@ $Src = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TargetRoot = Join-Path $HOME '.claude\skills'
 $Target = Join-Path $TargetRoot $SkillName
 
-foreach ($required in @('SKILL.md', '.claude-plugin\plugin.json', 'references', 'references\stages', 'scripts')) {
+foreach ($required in @('SKILL.md', '.claude-plugin\plugin.json', 'references\generate.md', 'references\research.md', 'references\feedback.md', 'references\troubleshooting.md', 'scripts')) {
     if (-not (Test-Path (Join-Path $Src $required))) {
         throw "源目录不完整，缺 $required：$Src"
     }
@@ -60,7 +60,7 @@ try {
     New-Item -ItemType Directory -Force -Path $Stage | Out-Null
     $StagedPlugin = Join-Path $Stage $SkillName
     Copy-Item -Recurse -Path $Src -Destination $StagedPlugin
-    foreach ($junk in @('.git', '.gitignore', 'scripts\__pycache__')) {
+    foreach ($junk in @('.git', '.gitignore', 'scripts\__pycache__', 'evals', 'commands', 'DECISIONS.md', 'DESIGN_NOTES.md', 'EVOLUTION.md')) {
         $path = Join-Path $StagedPlugin $junk
         if (Test-Path $path) { Remove-Item -Recurse -Force $path }
     }
@@ -71,5 +71,5 @@ try {
 }
 
 Write-Host "✓ 已安装 Claude Code 插件：$Target"
-Write-Host '  单智能体运行；六份阶段指导位于 references\stages\。'
+Write-Host '  单智能体运行；默认生成只读取 references\generate.md。'
 Write-Host '  新开 Claude Code 会话后输入：/blueink-suite <你的需求>'
