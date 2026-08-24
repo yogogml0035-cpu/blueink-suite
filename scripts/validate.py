@@ -5,12 +5,12 @@
 目录名对不对）。这里检查的是**本技能特有的、一旦破掉就会静默失效的东西**：
 
 - 入口是否真的机械关闭了模型自动调用（散文声明不算）；
-- 根级 ``agents/`` 是否不存在，四个核心阶段与两个条件阶段的指导是否完整；
+- 根级 ``agents/`` 是否不存在，默认快线与三份条件指导是否完整；
 - 文档里引用的文件是否真的存在（断链的"按需读取"等于没有那一节）；
 - 技能本体是否混进了品牌语料或绝对路径（技能必须能整目录复制给另一位老师）；
 - 五项验收契约的名称有没有被悄悄改掉；
 - 复审日期是否已经越过声明的复审周期；
-- 单智能体阶段协议是否明确共享上下文、禁止 Agent 调度并保留阶段产物；
+- 默认生成是否明确单智能体、强制方向确认并只保留四份产物；
 - `evolve --correct` 的落点标题是否还在，以及它有没有跑回 `SKILL.md`（首读层是方法论）；
 - `blueink.py` 的每个参数是否在文档里出现过（**没被任何文档提到的参数等于运行时发现不了的能力**）。
 
@@ -32,13 +32,11 @@ from pathlib import Path
 # 五项验收契约的名称。改名等于换掉一项验收标准，必须显式。
 CONTRACTS = ("入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效")
 
-STAGES = {
-    "evidence-research": ("证据研究阶段", "evidence-researcher"),
-    "editorial-strategy": ("编辑策略阶段", "editorial-strategist"),
-    "writing": ("成稿阶段", "professional-writer"),
-    "source-verification": ("来源核验阶段", "source-verifier"),
-    "editorial-red-team": ("编辑红队阶段", "editorial-adversary"),
-    "feedback-attribution": ("反馈归因阶段", "feedback-attributor"),
+GUIDES = {
+    "generate": "默认生成快线",
+    "research": "条件证据研究",
+    "feedback": "真实反馈",
+    "troubleshooting": "问题定位",
 }
 
 CLAUDE_SKILL_FIELDS = {
@@ -117,73 +115,45 @@ def check(root: Path) -> list[str]:
     if (root / "AGENTS.md").exists():
         problems.append("仍有 AGENTS.md——当前包声明只适配 Claude Code，不再维护跨工具侧门")
 
-    # --- 单智能体阶段契约 ---
+    # --- 单智能体快线契约 ---
     agents = root / "agents"
     if agents.exists():
         problems.append("仍有根级 agents/——Claude Code 会把它注册成子智能体，单智能体架构不成立")
+    if skill is not None:
+        skill_text = skill.read_text(encoding="utf-8")
+        if "不调用 Agent、Task、后台智能体、独立 `claude` 进程或其他模型会话" not in skill_text:
+            problems.append("SKILL.md 缺单智能体硬约束")
 
-    stage_root = root / "references" / "stages"
-    for stage, (title, role_id) in STAGES.items():
-        path = stage_root / f"{stage}.md"
+    guide_root = root / "references"
+    for guide, title in GUIDES.items():
+        path = guide_root / f"{guide}.md"
         if not path.is_file():
-            problems.append(f"缺阶段指导：references/stages/{stage}.md")
+            problems.append(f"缺运行指导：references/{guide}.md")
             continue
         meta, body = frontmatter(path)
         if meta:
             problems.append(
-                f"references/stages/{stage}.md 仍含 Agent frontmatter——阶段指导不得注册成 Agent"
+                f"references/{guide}.md 含 frontmatter——运行指导不得注册成独立入口"
             )
         if f"# {title}" not in body:
-            problems.append(f"references/stages/{stage}.md 缺标题「{title}」")
-        if "## 阶段产物" not in body:
-            problems.append(f"references/stages/{stage}.md 缺「阶段产物」契约")
-        if f'"role": "{role_id}"' not in body:
-            problems.append(
-                f"references/stages/{stage}.md 的 role 兼容标识应为 {role_id}"
-            )
+            problems.append(f"references/{guide}.md 缺标题「{title}」")
 
-    for stage in (
-        "editorial-strategy", "writing", "source-verification",
-        "editorial-red-team", "feedback-attribution",
-    ):
-        path = stage_root / f"{stage}.md"
-        if path.is_file() and "本阶段不得调用检索或搜索工具" not in path.read_text(encoding="utf-8"):
-            problems.append(
-                f"references/stages/{stage}.md 缺检索禁止项——共享工具会让阶段边界退化"
-            )
-
-    protocol = root / "references" / "stage-execution-protocol.md"
-    if not protocol.is_file():
-        problems.append("缺 references/stage-execution-protocol.md")
-    else:
-        protocol_text = protocol.read_text(encoding="utf-8")
+    generate = guide_root / "generate.md"
+    if generate.is_file():
+        text = generate.read_text(encoding="utf-8")
         for marker, message in (
-            ("运行期间只使用当前 `/blueink-suite` 会话", "协议缺单会话执行约束"),
-            ("阶段之间共享同一会话上下文和宿主工具", "协议没有声明上下文与工具共享"),
-            ("来源核验与编辑红队属于同一会话内的受限输入复核", "协议没有声明受限输入复核的能力边界"),
-            ("这张表是**推理输入合同**", "协议没有定义阶段输入合同"),
-            ("封闭附件快线（默认）", "协议没有把封闭附件快线设为默认路径"),
-            ("扩展证据路径（条件触发）", "协议没有把证据研究限制为条件路径"),
+            ("🔴 CHECKPOINT", "默认生成缺成稿前方向确认检查点"),
+            ("生成任务不允许零轮访谈", "默认生成仍允许跳过访谈"),
+            ("最多 12 条", "默认生成没有限制事实原子数量"),
+            ("这不是独立审查", "默认生成把同一上下文复核包装成独立审查"),
+            ("不在写作时重新检索、换主线或补事实", "默认生成允许成稿时重新选素材"),
+            ("run.json", "默认生成缺新版聚合运行记录"),
+            ("delivery.md", "默认生成缺业务交付文件"),
         ):
-            if marker not in protocol_text:
+            if marker not in text:
                 problems.append(message)
-        for forbidden in ("subagent_type", "run_in_background", "ANTHROPIC_BASE_URL", "output_config.format"):
-            if forbidden in protocol_text:
-                problems.append(f"单智能体协议仍含多智能体运行路径：{forbidden}")
-
-    strategy = stage_root / "editorial-strategy.md"
-    if strategy.is_file():
-        strategy_text = strategy.read_text(encoding="utf-8")
-        for marker, message in (
-            ("## 轻量证据整理（只在封闭附件快线）", "编辑策略指导缺快线证据整理入口"),
-            ("先写 `.blueink/runs/<run_id>/evidence.json`", "快线没有先落 evidence.json 再做策略"),
-        ):
-            if marker not in strategy_text:
-                problems.append(message)
-
-    evidence_stage = stage_root / "evidence-research.md"
-    if evidence_stage.is_file() and "本阶段不是默认路径" not in evidence_stage.read_text(encoding="utf-8"):
-        problems.append("证据研究指导没有声明为条件路径——运行可能重新退化成每次全量取证")
+    if (root / "references" / "stages").exists():
+        problems.append("仍有 references/stages/——默认生成已经合并为一份快线指导")
 
     # --- 文档断链 ---
     # 只检查看起来是"技能内相对路径"的引用。文档里也会出现知识库里的路径
@@ -224,7 +194,7 @@ def check(root: Path) -> list[str]:
                 problems.append(f"评测规格 JSON 无法解析：{exc}")
 
     problems += review_due(root)
-    problems += stage_contract_fields(root)
+    problems += guide_contract(root)
     problems += workspace_template_matches(root)
     problems += claude_only_distribution(root)
     problems += product_voice(root)
@@ -355,7 +325,7 @@ def documented_flags(root: Path) -> list[str]:
 
 
 def correction_target(root: Path) -> list[str]:
-    """首读 Gotchas 与 ``evolve.py --correct`` 的详细落点必须同时存在。"""
+    """``evolve.py --correct`` 的详细落点与条件路由必须同时存在。"""
     target = root / "references" / "troubleshooting.md"
     if not target.is_file():
         return ["缺 references/troubleshooting.md——evolve --correct 没有落点"]
@@ -366,32 +336,26 @@ def correction_target(root: Path) -> list[str]:
     if not skill.is_file():
         return ["缺 SKILL.md"]
     skill_text = skill.read_text(encoding="utf-8")
-    if not re.search(r"^#{1,6}[ \t]+Gotchas\b", skill_text, re.M | re.I):
-        return ["SKILL.md 缺 `## Gotchas`——首读层没有保留最关键的环境反直觉事实"]
     if "references/troubleshooting.md" not in skill_text:
-        return ["SKILL.md 的 Gotchas 没有路由到 references/troubleshooting.md"]
+        return ["SKILL.md 没有条件路由到 references/troubleshooting.md"]
     return []
 
 
-# 阶段切换卡只负责把同一智能体的注意力收束到当前责任，不是委托任务单。
-STAGE_CARD_FIELDS = ("stage", "run_id", "guide", "inputs", "forbidden", "expect")
-
-
-def stage_contract_fields(root: Path) -> list[str]:
-    """阶段协议必须声明切换卡字段，并能路由到全部阶段指导。"""
-    rel = "references/stage-execution-protocol.md"
-    path = root / rel
-    if not path.is_file():
-        return [f"缺 {rel}"]
-    text = path.read_text(encoding="utf-8")
-    problems = [
-        f"{rel} 的阶段切换卡缺 {field}"
-        for field in STAGE_CARD_FIELDS if f"{field}:" not in text
-    ]
-    for stage in STAGES:
-        guide = f"references/stages/{stage}.md"
-        if guide not in text:
-            problems.append(f"{rel} 没有路由到 {guide}")
+def guide_contract(root: Path) -> list[str]:
+    """根入口只默认加载 generate，其余三份指导必须条件触发。"""
+    skill = root / "SKILL.md"
+    if not skill.is_file():
+        return ["缺 SKILL.md"]
+    text = skill.read_text(encoding="utf-8")
+    problems: list[str] = []
+    if "开启运行后只读取" not in text or "references/generate.md" not in text:
+        problems.append("SKILL.md 没有把 generate.md 设为唯一默认运行指导")
+    for guide in ("research", "feedback", "troubleshooting"):
+        if f"references/{guide}.md" not in text:
+            problems.append(f"SKILL.md 没有条件路由到 references/{guide}.md")
+    for legacy in ("stage-execution-protocol.md", "references/stages/"):
+        if legacy in text:
+            problems.append(f"SKILL.md 仍路由到旧阶段资产：{legacy}")
     return problems
 
 

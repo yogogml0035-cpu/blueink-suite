@@ -8,7 +8,7 @@
     {
       "name": "blueink-suite",
       "source": "./",
-      "description": "蓝墨 BlueInk——仅适用于 Claude Code 的证据驱动汽车公关文案编辑决策系统。必须显式启动，默认入口 /blueink-suite。"
+      "description": "蓝墨 BlueInk——单智能体、成稿前写法确认、四份运行产物的汽车公关文案编辑决策系统。必须显式启动，默认入口 /blueink-suite。"
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "name": "blueink-suite",
-  "version": "3.1.0",
-  "description": "蓝墨 BlueInk——仅适用于 Claude Code 的汽车公关文案编辑决策系统。一个智能体共享上下文与工具，默认执行策略、成稿、核验和红队，资料扩展与反馈归因按条件进入；绑定后的索引与写作流程只读源库。必须显式启动，默认入口 /blueink-suite。",
+  "version": "4.0.0",
+  "description": "蓝墨 BlueInk——仅适用于 Claude Code 的汽车公关文案编辑决策系统。一个智能体完成逐轮访谈、写法确认、成稿与高风险事实复核；默认只加载一份生成快线，研究与反馈按条件进入。必须显式启动，默认入口 /blueink-suite。",
   "author": {
     "name": "新蓝标数字 · 汽车事业群 · AI 内容中台"
   }

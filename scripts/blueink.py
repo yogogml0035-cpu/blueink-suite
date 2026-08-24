@@ -17,8 +17,8 @@
     retrieve     按任务检索证据切片
     official     官方来源白名单：查看、追加、访问前校验 URL
     open         开启一次运行并创建运行记录
-    stage        标记运行走到了哪一步
-    close        归档一次运行
+    save         校验并保存本次方向决策或核验结论
+    close        生成交付内容并归档一次运行
     purge        按留存策略清理旧运行记录
     memory       条件化记忆的读写
     audit        五项验收契约的机械审计
@@ -26,8 +26,8 @@
 
 所有命令都支持 ``--json`` 输出，方便当前阶段直接消费。
 
-这里**没有**改稿编排与版本回退命令，这是边界不是遗漏：一次生成内部的回退由回执
-``status`` 驱动（见《单智能体阶段执行协议》的快线与扩展路径），老师后续的修改意见只进入学习外循环。
+这里**没有**改稿编排与版本回退命令，这是边界不是遗漏：一次生成只允许对高风险句
+做一次局部修正，老师后续的修改意见只进入学习外循环。
 "改稿退到哪一层"是另一个产品，第一版不做。self_check.py --claims 会双向核对这份
 子命令清单与文档，多一个未声明的命令就判失败。
 """
@@ -309,16 +309,41 @@ def cmd_stage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_save(args: argparse.Namespace) -> int:
+    if args.input:
+        raw = Path(args.input).read_text(encoding="utf-8")
+    else:
+        raw = sys.stdin.read()
+    if not raw.strip():
+        raise ValueError("save 需要从标准输入或 --input 读取 JSON")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"save 输入不是合法 JSON：第 {exc.lineno} 行第 {exc.colno} 列") from exc
+    data = run_record.save_payload(args.run, args.kind, payload, start=args.project)
+    artifact = "run.json" if args.kind == "decision" else "verify.json"
+    _emit(
+        data,
+        args.json,
+        [f"✓ {artifact} 已校验并原子写入", f"运行：{args.run}"],
+    )
+    return 0
+
+
 def cmd_close(args: argparse.Namespace) -> int:
+    current = run_record.load_meta(args.run, start=args.project)
+    delivery = None
+    if current.get("mode") == "生成" and current.get("schema_version") == 4:
+        delivery = run_record.build_delivery(args.run, start=args.project)
     meta = run_record.close_run(args.run, start=args.project)
+    lines = [f"{args.run} 已归档，产出 {len(meta.get('artifacts') or [])} 个文件"]
+    if delivery:
+        lines.append(f"交付：{delivery}")
+    lines.append("需要定位后台问题时再运行 audit；默认交付不追加审计轮次。")
     _emit(
         meta,
         args.json,
-        [
-            f"{args.run} 已归档，产出 {len(meta.get('artifacts') or [])} 个文件",
-            "建议接着跑：blueink.py audit --input "
-            f"{run_record.run_dir_for(args.run, args.project)}",
-        ],
+        lines,
     )
     return 0
 
@@ -542,7 +567,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             + ("" if closed else "，尚未归档")
         )
         # 附件登记是"老师给的文件到底被当成本次证据了吗"这个问题的唯一答案。
-        # 它只在 meta.json 里，而 doctor 是老师会去看的那一条命令。
+        # 它只在运行记录里，而 doctor 是老师会去看的那一条命令。
         attachments = run_record.attachment_paths(last)
         if attachments:
             lines.append(
@@ -640,12 +665,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="记录用户实际使用的 Claude Code 显式入口；同名冲突时可能是命名空间形式")
     p.set_defaults(func=cmd_open)
 
-    p = sub.add_parser("stage", help="标记运行走到了哪一步")
+    p = sub.add_parser("save", help="校验并保存方向决策或核验结论")
     p.add_argument("--run", required=True)
-    p.add_argument("--to", type=int, required=True)
-    p.set_defaults(func=cmd_stage)
+    p.add_argument("--kind", required=True, choices=["decision", "verify"])
+    p.add_argument("--input", help="JSON 输入文件；不提供时从标准输入读取")
+    p.set_defaults(func=cmd_save)
 
-    p = sub.add_parser("close", help="归档一次运行")
+    p = sub.add_parser("close", help="生成交付内容并归档一次运行")
     p.add_argument("--run", required=True)
     p.set_defaults(func=cmd_close)
 
@@ -702,7 +728,7 @@ def main(argv: list[str] | None = None) -> int:
             official_mod.OfficialSourceError) as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
 

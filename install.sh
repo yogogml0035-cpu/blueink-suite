@@ -2,8 +2,8 @@
 # blueink-suite · Claude Code / macOS 直装脚本
 #
 # 推荐优先使用 README 里的 Claude Code marketplace 安装。这个脚本只作为本地源码
-# 直装入口：把完整插件放到 ~/.claude/skills/blueink-suite。运行时只有一个 Skill，
-# 六份阶段指导从 references/stages/ 按需读取，不注册全局或插件子智能体。
+# 直装入口：把运行插件放到 ~/.claude/skills/blueink-suite。运行时只有一个 Skill，
+# 默认生成只读取 references/generate.md，不注册全局或插件子智能体。
 
 set -eu
 
@@ -32,7 +32,8 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 2
 fi
 
-for required in SKILL.md .claude-plugin/plugin.json references references/stages scripts; do
+for required in SKILL.md .claude-plugin/plugin.json references/generate.md \
+    references/research.md references/feedback.md references/troubleshooting.md scripts; do
     if [ ! -e "${SRC}/${required}" ]; then
         echo "源目录不完整，缺 ${required}：${SRC}" >&2
         exit 1
@@ -74,8 +75,13 @@ STAGE="$(mktemp -d "${TARGET_ROOT}/.blueink-install.XXXXXX")"
 trap 'rm -rf "${STAGE}"' EXIT HUP INT TERM
 cp -R "${SRC}" "${STAGE}/${SKILL_NAME}"
 rm -rf "${STAGE}/${SKILL_NAME}/.git" \
-       "${STAGE}/${SKILL_NAME}/scripts/__pycache__"
-rm -f "${STAGE}/${SKILL_NAME}/.gitignore"
+       "${STAGE}/${SKILL_NAME}/scripts/__pycache__" \
+       "${STAGE}/${SKILL_NAME}/evals" \
+       "${STAGE}/${SKILL_NAME}/commands"
+rm -f "${STAGE}/${SKILL_NAME}/.gitignore" \
+      "${STAGE}/${SKILL_NAME}/DECISIONS.md" \
+      "${STAGE}/${SKILL_NAME}/DESIGN_NOTES.md" \
+      "${STAGE}/${SKILL_NAME}/EVOLUTION.md"
 
 if [ -e "${TARGET}" ]; then
     rm -rf "${TARGET}"
@@ -83,5 +89,5 @@ fi
 mv "${STAGE}/${SKILL_NAME}" "${TARGET}"
 
 echo "✓ 已安装 Claude Code 插件：${TARGET}"
-echo "  单智能体运行；六份阶段指导位于 references/stages/。"
+echo "  单智能体运行；默认生成只读取 references/generate.md。"
 echo "  新开 Claude Code 会话后输入：/blueink-suite <你的需求>"

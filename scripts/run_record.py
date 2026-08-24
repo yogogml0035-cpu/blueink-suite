@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """运行记录：让"这次走到了哪一步"变成可查的事实。
 
-每次运行都开一个目录并落 ``meta.json``。业务侧不需要操作这些文件，它们只在定位
-问题时被读取。
+每次新运行都开一个目录并落 ``run.json``。它同时保存登记信息、逐轮回答、已确认
+方向与最小事实原子，避免把同一个判断翻译成多份阶段回执。旧运行的 ``meta.json``
+继续只读兼容。
 
 **这套记账有成本，所以它自带留存期。** 运行目录里躺着访谈原文、素材路径和交付
 正文——它是可定位性的载体，也是一份会无限增长的客户内容留存。``purge`` 把"留多
@@ -17,6 +18,7 @@ import hashlib
 import json
 import re
 import shutil
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -38,8 +40,9 @@ EVIDENCE_BOUNDARIES = ("kb", "attachments")
 KEEP_DAYS = 90
 KEEP_RUNS = 20
 RUN_META_FIELDS = (
-    "run_id", "started_via", "started_at", "mode", "brand", "brand_key",
+    "schema_version", "run_id", "started_via", "started_at", "mode", "brand", "brand_key",
     "brand_asked", "kb_root", "bound", "task_attachments", "evidence_boundary",
+    "interview", "direction", "facts", "decision", "metrics",
     "stage", "stage_name", "closed_at", "artifacts",
 )
 
@@ -48,10 +51,10 @@ STAGE_NAMES = {
     1: "逐轮访谈",
     2: "取证",
     3: "编辑策略",
-    4: "写作程序",
+    4: "方向与事实已确认",
     5: "成稿",
-    6: "来源核验",
-    7: "编辑反方",
+    6: "高风险句复核",
+    7: "条件编辑风险",
     8: "交付",
     9: "运行归档",
     10: "反馈归因",
@@ -60,16 +63,16 @@ STAGE_NAMES = {
 
 # 各阶段的产出文件，audit 与 doctor 用它判断运行走到哪、缺了什么
 STAGE_ARTIFACTS = {
-    1: ["interview.json"],
-    2: ["evidence.json"],
-    3: ["strategy.json"],
     4: ["program.json"],
-    5: ["draft.md", "draft-a.md", "write-receipt.json"],
+    5: ["draft.md", "draft-a.md"],
     6: ["verify.json", "verify-a.json"],
-    7: ["adversary.json"],
     8: ["delivery.md"],
     10: ["feedback.json"],
 }
+
+STRONG_WORDS = ("唯一", "全部", "普遍", "均", "最高")
+VERDICTS = ("可进入人工初审", "有待确认项", "暂不建议提交")
+JUDGEMENTS = ("matched", "drifted", "unsourced", "stale")
 
 _SLUG = re.compile(r"[^a-z0-9-]+")
 
@@ -85,10 +88,11 @@ def new_run_id(brand_key: str, when: datetime | None = None) -> str:
 
 def _unique_run_id(base: str, runs_root: Path) -> str:
     """同一秒内开两次运行不能共用目录，否则第一次的记录会被第二次覆盖。"""
-    if not (runs_root / base / "meta.json").is_file():
+    if not any((runs_root / base / name).is_file() for name in ("run.json", "meta.json")):
         return base
     n = 2
-    while (runs_root / f"{base}-{n}" / "meta.json").is_file():
+    while any((runs_root / f"{base}-{n}" / name).is_file()
+              for name in ("run.json", "meta.json")):
         n += 1
     return f"{base}-{n}"
 
@@ -243,6 +247,7 @@ def open_run(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     meta = {
+        "schema_version": 4,
         "run_id": run_id,
         "started_via": started_via,
         "started_at": (when or datetime.now()).isoformat(timespec="seconds"),
@@ -254,6 +259,11 @@ def open_run(
         "bound": bound,
         "task_attachments": task_attachments,
         "evidence_boundary": evidence_boundary,
+        "interview": None,
+        "direction": None,
+        "facts": [],
+        "decision": None,
+        "metrics": {},
         "stage": 0,
         "stage_name": STAGE_NAMES[0],
         "closed_at": None,
@@ -281,19 +291,41 @@ def attachment_paths(meta: Any) -> list[str]:
 
 
 def _meta_path(run_dir: Path) -> Path:
-    return run_dir / "meta.json"
+    current = run_dir / "run.json"
+    legacy = run_dir / "meta.json"
+    return current if current.is_file() or not legacy.is_file() else legacy
 
 
 def _clean_meta(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
-        raise ValueError("meta.json 顶层不是对象")
+        raise ValueError("运行记录顶层不是对象")
     return {field: data[field] for field in RUN_META_FIELDS if field in data}
 
 
 def _write_meta(run_dir: Path, meta: dict[str, Any]) -> None:
-    _meta_path(run_dir).write_text(
-        json.dumps(_clean_meta(meta), ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _atomic_json(_meta_path(run_dir), _clean_meta(meta))
+
+
+def _atomic_json(path: Path, data: Any) -> None:
+    """先完整写入同目录临时文件，再原子替换正式 JSON。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+    ) as fh:
+        temp = Path(fh.name)
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    temp.replace(path)
+
+
+def _atomic_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+    ) as fh:
+        temp = Path(fh.name)
+        fh.write(text)
+    temp.replace(path)
 
 
 def run_dir_for(run_id: str, start=None) -> Path:
@@ -305,6 +337,316 @@ def load_meta(run_id: str, start=None) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"找不到运行记录 {run_id}（缺 {path}）")
     return _clean_meta(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _allowed_source(path: str, meta: dict[str, Any]) -> bool:
+    if path.startswith(("http://", "https://")):
+        return True
+    kb_root = str(meta.get("kb_root") or "")
+    try:
+        raw = Path(path).expanduser()
+        resolved = ((Path(kb_root) / raw) if kb_root and not raw.is_absolute() else raw).resolve()
+    except (OSError, RuntimeError):
+        return False
+    attachments = {
+        str(Path(item).expanduser().resolve())
+        for item in attachment_paths(meta)
+    }
+    if str(resolved) in attachments:
+        return True
+    return bool(kb_root) and workspace.within(resolved, kb_root)
+
+
+def _one_question(text: str) -> bool:
+    return str(text or "").count("？") + str(text or "").count("?") <= 1
+
+
+def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("decision 输入顶层必须是对象")
+
+    interview = payload.get("interview")
+    direction = payload.get("direction")
+    facts = payload.get("facts")
+    decision = payload.get("decision")
+    if not isinstance(interview, dict) or not isinstance(interview.get("rounds"), list):
+        raise ValueError("decision.interview.rounds 必须是数组")
+    rounds = interview["rounds"]
+    if meta.get("mode") == "生成" and not rounds:
+        raise ValueError("生成任务不允许零轮访谈：至少要有一次成稿前方向确认")
+    ordinary = 0
+    for index, item in enumerate(rounds, 1):
+        if not isinstance(item, dict):
+            raise ValueError(f"interview.rounds[{index - 1}] 必须是对象")
+        kind = str(item.get("kind") or "")
+        if kind not in ("gap", "direction", "hard_conflict"):
+            raise ValueError(f"第 {index} 轮 kind 必须是 gap、direction 或 hard_conflict")
+        ordinary += kind != "hard_conflict"
+        question = str(item.get("question") or "").strip()
+        answer = str(item.get("answer") or "").strip()
+        if not question or not answer:
+            raise ValueError(f"第 {index} 轮必须同时记录 question 和老师原话 answer")
+        if not _one_question(question):
+            raise ValueError(f"第 {index} 轮一次问了多个问题")
+    if ordinary > 2:
+        raise ValueError("普通生成最多两轮；额外轮次只能用于事实或来源 hard_conflict")
+    if meta.get("mode") == "生成" and str(rounds[-1].get("kind") or "") != "direction":
+        raise ValueError("生成任务最后一轮必须是成稿前方向确认")
+
+    if not isinstance(direction, dict) or direction.get("confirmed_by_user") is not True:
+        raise ValueError("direction.confirmed_by_user 必须为 true")
+    options = direction.get("options")
+    if not isinstance(options, list) or not 1 <= len(options) <= 3:
+        raise ValueError("direction.options 必须包含 1 到 3 个真实写法选项")
+    option_ids = set()
+    for index, option in enumerate(options):
+        if not isinstance(option, dict):
+            raise ValueError(f"direction.options[{index}] 必须是对象")
+        for field in ("id", "name", "claim", "suitable_for", "cost"):
+            if not str(option.get(field) or "").strip():
+                raise ValueError(f"direction.options[{index}] 缺字段 {field}")
+        option_ids.add(str(option["id"]))
+    if str(direction.get("selected") or "") not in option_ids:
+        raise ValueError("direction.selected 必须指向 options 中的 id")
+    if not any(str(item.get("kind") or "") == "direction" for item in rounds):
+        raise ValueError("interview.rounds 缺成稿前方向确认记录")
+
+    if not isinstance(facts, list) or len(facts) > 12:
+        raise ValueError("facts 必须是数组且最多 12 条")
+    if meta.get("mode") == "生成" and not facts:
+        raise ValueError("生成任务至少需要一条可追溯事实原子")
+    fact_ids = set()
+    for index, fact in enumerate(facts):
+        if not isinstance(fact, dict):
+            raise ValueError(f"facts[{index}] 必须是对象")
+        for field in ("id", "statement", "source_path", "source_quote", "source_date", "scope"):
+            if not str(fact.get(field) or "").strip():
+                raise ValueError(f"facts[{index}] 缺字段 {field}")
+        fid = str(fact["id"])
+        if fid in fact_ids:
+            raise ValueError(f"facts 出现重复 id：{fid}")
+        fact_ids.add(fid)
+        source = str(fact["source_path"])
+        if not _allowed_source(source, meta):
+            raise ValueError(f"facts[{index}].source_path 未登记或越过绑定知识库：{source}")
+        allowed = fact.get("allowed_strong_words")
+        if not isinstance(allowed, list) or any(word not in STRONG_WORDS for word in allowed):
+            raise ValueError(
+                f"facts[{index}].allowed_strong_words 只能从 {STRONG_WORDS} 选择"
+            )
+        statement = str(fact["statement"])
+        for word in STRONG_WORDS:
+            if word in statement and word not in allowed:
+                raise ValueError(
+                    f"facts[{index}] 使用强比较词「{word}」但未在 allowed_strong_words 授权"
+                )
+
+    if not isinstance(decision, dict):
+        raise ValueError("decision.decision 必须是对象")
+    for field in ("communication_task", "category", "audience", "publisher",
+                  "material_plan", "information_budget", "expression_bounds", "assumptions"):
+        if field not in decision:
+            raise ValueError(f"decision.decision 缺字段 {field}")
+    return {
+        "interview": interview,
+        "direction": direction,
+        "facts": facts,
+        "decision": decision,
+    }
+
+
+def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
+    run_dir = run_dir_for(run_id, start)
+    meta = load_meta(run_id, start)
+    if _meta_path(run_dir).name != "run.json":
+        raise ValueError("旧版 meta.json 运行只读兼容，不能写入新版 decision")
+    data = _validate_decision(payload, meta)
+    meta.update(data)
+    meta["stage"] = 4
+    meta["stage_name"] = "方向已确认"
+    metrics = dict(meta.get("metrics") or {})
+    metrics["decision_saved_at"] = datetime.now().isoformat(timespec="seconds")
+    meta["metrics"] = metrics
+    _write_meta(run_dir, meta)
+    return meta
+
+
+def _expected_verdict(payload: dict[str, Any]) -> str:
+    claims = [item for item in (payload.get("claims") or []) if isinstance(item, dict)]
+    judgements = [str(item.get("judgement") or "") for item in claims]
+    if "unsourced" in judgements or payload.get("cross_brand") or payload.get("redline_hits"):
+        return "暂不建议提交"
+    if "drifted" in judgements or "stale" in judgements:
+        return "有待确认项"
+    return "可进入人工初审"
+
+
+def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("verify 输入顶层必须是对象")
+    if not (run_dir / "draft.md").is_file():
+        raise ValueError("缺 draft.md，不能先核验后成稿")
+    claims = payload.get("claims")
+    sources = payload.get("sources_used")
+    if not isinstance(claims, list):
+        raise ValueError("verify.claims 必须是数组")
+    draft = (run_dir / "draft.md").read_text(encoding="utf-8")
+    facts_by_id = {
+        str(fact.get("id")): fact for fact in (meta.get("facts") or [])
+        if isinstance(fact, dict) and fact.get("id")
+    }
+    for index, claim in enumerate(claims):
+        if not isinstance(claim, dict):
+            raise ValueError(f"claims[{index}] 必须是对象")
+        judgement = str(claim.get("judgement") or "")
+        if judgement not in JUDGEMENTS:
+            raise ValueError(f"claims[{index}].judgement 必须是 {JUDGEMENTS} 之一")
+        quote = str(claim.get("quote") or "").strip()
+        if not quote:
+            raise ValueError(f"claims[{index}] 缺正文 quote")
+        if quote not in draft:
+            raise ValueError(f"claims[{index}].quote 不在 draft.md 中")
+        fact_ids = claim.get("fact_ids") or []
+        if not isinstance(fact_ids, list) or any(str(fid) not in facts_by_id for fid in fact_ids):
+            raise ValueError(f"claims[{index}].fact_ids 含 run.json 中不存在的事实 id")
+    for word in STRONG_WORDS:
+        if word not in draft:
+            continue
+        matches = [claim for claim in claims if word in str(claim.get("quote") or "")]
+        if not matches:
+            raise ValueError(f"正文使用强比较词「{word}」，verify.claims 必须逐句复核")
+        for claim in matches:
+            authorized = any(
+                word in (facts_by_id[str(fid)].get("allowed_strong_words") or [])
+                for fid in (claim.get("fact_ids") or []) if str(fid) in facts_by_id
+            )
+            if not authorized:
+                raise ValueError(
+                    f"核验句使用强比较词「{word}」，但引用事实没有授权该比较范围"
+                )
+    if not isinstance(sources, list) or not sources:
+        raise ValueError("verify.sources_used 至少包含一条本稿实际来源")
+    allowed_sources = {
+        str(fact.get("source_path")) for fact in (meta.get("facts") or [])
+        if isinstance(fact, dict) and fact.get("source_path")
+    }
+    for index, item in enumerate(sources):
+        if not isinstance(item, dict) or not str(item.get("path_or_url") or "").strip():
+            raise ValueError(f"sources_used[{index}] 缺 path_or_url")
+        source = str(item["path_or_url"])
+        if source not in allowed_sources and not _allowed_source(source, meta):
+            raise ValueError(f"sources_used[{index}] 未登记或越界：{source}")
+
+    cross_brand = payload.get("cross_brand") or []
+    redline_hits = payload.get("redline_hits") or []
+    editorial_risks = payload.get("editorial_risks") or []
+    if not all(isinstance(value, list) for value in (cross_brand, redline_hits, editorial_risks)):
+        raise ValueError("cross_brand、redline_hits、editorial_risks 必须是数组")
+    if len(editorial_risks) > 3:
+        raise ValueError("editorial_risks 最多三条")
+
+    counts = {name: 0 for name in JUDGEMENTS}
+    for claim in claims:
+        counts[str(claim["judgement"])] += 1
+    data = {
+        "role": "single-agent-verifier",
+        "run_id": meta.get("run_id"),
+        "claims": claims,
+        "coverage": {"total_claims": len(claims), **counts},
+        "cross_brand": cross_brand,
+        "redline_hits": redline_hits,
+        "editorial_risks": editorial_risks,
+        "sources_used": sources,
+    }
+    data["verdict"] = _expected_verdict(data)
+    return data
+
+
+def save_verify(run_id: str, payload: Any, start=None) -> dict[str, Any]:
+    run_dir = run_dir_for(run_id, start)
+    meta = load_meta(run_id, start)
+    if _meta_path(run_dir).name != "run.json":
+        raise ValueError("旧版 meta.json 运行只读兼容，不能写入新版 verify")
+    data = _validate_verify(payload, meta, run_dir)
+    _atomic_json(run_dir / "verify.json", data)
+    meta["stage"] = 6
+    meta["stage_name"] = "高风险句已复核"
+    metrics = dict(meta.get("metrics") or {})
+    metrics["verify_saved_at"] = datetime.now().isoformat(timespec="seconds")
+    meta["metrics"] = metrics
+    _write_meta(run_dir, meta)
+    return data
+
+
+def save_payload(run_id: str, kind: str, payload: Any, start=None) -> dict[str, Any]:
+    if kind == "decision":
+        return save_decision(run_id, payload, start)
+    if kind == "verify":
+        return save_verify(run_id, payload, start)
+    raise ValueError("kind 只能是 decision 或 verify")
+
+
+def build_delivery(run_id: str, start=None) -> Path:
+    run_dir = run_dir_for(run_id, start)
+    draft_path = run_dir / "draft.md"
+    verify_path = run_dir / "verify.json"
+    if not draft_path.is_file():
+        raise FileNotFoundError(f"缺 {draft_path}")
+    if not verify_path.is_file():
+        raise FileNotFoundError(f"缺 {verify_path}")
+    verify = json.loads(verify_path.read_text(encoding="utf-8"))
+    if not isinstance(verify, dict) or verify.get("verdict") not in VERDICTS:
+        raise ValueError("verify.json 缺合法 verdict")
+
+    issues: list[str] = []
+    for claim in verify.get("claims") or []:
+        if not isinstance(claim, dict) or claim.get("judgement") == "matched":
+            continue
+        action = str(claim.get("action") or "请核对来源后处理")
+        issues.append(
+            f"- {claim.get('judgement')}｜{str(claim.get('quote') or '')}｜{action}"
+        )
+    for label, key in (("跨品牌", "cross_brand"), ("红线", "redline_hits")):
+        for item in verify.get(key) or []:
+            issues.append(f"- {label}｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}")
+    for item in verify.get("editorial_risks") or []:
+        issues.append(
+            f"- 编辑风险｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}"
+        )
+
+    source_lines: list[str] = []
+    for item in verify.get("sources_used") or []:
+        if not isinstance(item, dict):
+            continue
+        raw = str(item.get("path_or_url") or "")
+        label = raw if raw.startswith(("http://", "https://")) else Path(raw).name
+        kind = str(item.get("kind") or "来源")
+        date = str(item.get("date") or "").strip()
+        source_lines.append(f"- {kind}：{label}" + (f"（{date}）" if date else ""))
+
+    card = f"{verify['verdict']}。"
+    if issues:
+        card += "\n" + "\n".join(issues[:5])
+    else:
+        card += "核心事实均有来源，未发现跨品牌信息和待确认事实。"
+    delivery = (
+        draft_path.read_text(encoding="utf-8").strip()
+        + "\n\n交付前核对卡\n\n"
+        + card
+        + "\n\n实际来源\n\n"
+        + "\n".join(source_lines)
+        + "\n"
+    )
+    target = run_dir / "delivery.md"
+    _atomic_text(target, delivery)
+    meta = load_meta(run_id, start)
+    meta["stage"] = 8
+    meta["stage_name"] = "交付已生成"
+    metrics = dict(meta.get("metrics") or {})
+    metrics["delivery_saved_at"] = datetime.now().isoformat(timespec="seconds")
+    meta["metrics"] = metrics
+    _write_meta(run_dir, meta)
+    return target
 
 
 def set_stage(run_id: str, stage: int, start=None) -> dict[str, Any]:
@@ -319,6 +661,8 @@ def close_run(run_id: str, start=None) -> dict[str, Any]:
     """归档一次运行，并把摘要写进 runs/index.json。"""
     run_dir = run_dir_for(run_id, start)
     meta = load_meta(run_id, start)
+    meta["stage"] = 9
+    meta["stage_name"] = STAGE_NAMES[9]
     meta["closed_at"] = datetime.now().isoformat(timespec="seconds")
     meta["artifacts"] = sorted(p.name for p in run_dir.iterdir() if p.is_file())
     _write_meta(run_dir, meta)
@@ -376,6 +720,12 @@ def reached_stage(run_dir: Path) -> int:
     """按产出文件判断这次运行实际走到了哪一步。"""
     present = present_artifacts(run_dir)
     reached = 0
+    if "run.json" in present:
+        try:
+            record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+            reached = int(record.get("stage") or 0) if isinstance(record, dict) else 0
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            reached = 0
     for stage in sorted(STAGE_ARTIFACTS):
         if any(name in present for name in STAGE_ARTIFACTS[stage]):
             reached = stage
