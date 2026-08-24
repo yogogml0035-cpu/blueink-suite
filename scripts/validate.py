@@ -99,6 +99,10 @@ def check(root: Path) -> list[str]:
             problems.append(f"SKILL.md 含 Claude Code 未声明的 frontmatter 字段：{unknown}")
         if "/blueink " in body or "`/blueink`" in body.replace("`/blueink-suite`", ""):
             pass  # 正文里提到旧入口是为了说明不兼容，不算问题
+        if "有附件时不要先跑 `status`" not in body:
+            problems.append(
+                "SKILL.md 缺附件优先短路 —— 已给附件的任务可能先跑 status 并被误判成绑定失败"
+            )
         for name in CONTRACTS:
             if name not in body and name not in (root / "references/troubleshooting.md").read_text(
                 encoding="utf-8"

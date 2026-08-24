@@ -12,7 +12,7 @@
 
 ```bash
 python3 scripts/blueink.py audit --input <运行记录目录> --output <结论.json>
-python3 scripts/test_state.py          # 状态层回归，173 项检查
+python3 scripts/test_state.py          # 状态层回归，174 项检查
 python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致性 / 变异承重
 ```
 
@@ -30,7 +30,7 @@ python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致
 | `explained` | 每条检查的 detail 非空；被跳过的检查不能写成「通过」 | 把"没查"伪装成"查过了"是最危险的一种输出 |
 | `contracts` | 五项名称依次为：入口唯一、单品牌隔离、动态访谈、责任隔离、输出有效 | 防止某项契约被悄悄改名或换掉 |
 
-**状态层回归检查**（`state-layer` / `explicit-entry` / `role-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计和附件登记，共 173 项。
+**状态层回归检查**（`state-layer` / `explicit-entry` / `role-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计和附件登记，共 174 项。
 
 **自证检查**（`self-claims` / `self-mutation` / `pipeline-wiring`）验的是"声明与实际是否一致"这一类不会报错的漂移。其中 `self-mutation` 是这份规格里唯一的**负向**检查：它真的往技能副本里注入十个已知失败形态，断言每一个都会让指定检查转红。
 

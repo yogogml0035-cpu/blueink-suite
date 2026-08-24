@@ -867,6 +867,17 @@ def test_attachment_only_run(tmp: Path) -> None:
     project = tmp / "attach_only"
     project.mkdir()
     (project / ".blueink").mkdir()   # 有 .blueink 但没有 workspace.yaml：未绑定
+
+    import subprocess as _sp_status
+    _entry = str(Path(__file__).resolve().parent / "blueink.py")
+    status = _sp_status.run(
+        [sys.executable, _entry, "--project", str(project), "--json", "status"],
+        capture_output=True, text=True,
+    )
+    status_payload = json.loads(status.stdout)
+    check("未绑定 status 是正常状态", status.returncode == 0 and status_payload["bound"] is False,
+          f"rc={status.returncode} out={status.stdout[:120]} err={status.stderr[-120:]}")
+
     ref = tmp / "refs"
     ref.mkdir()
     one = ref / "指引.md"

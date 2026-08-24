@@ -69,12 +69,14 @@ metadata:
 $BLUEINK open --mode 生成 --brand "<本次品牌>" --attach "<文件绝对路径>" [--attach …]
 ```
 
+**有附件时不要先跑 `status`、`bind`、`check-brand` 或 `index`。** `attachments` 非空已经决定本次走情形一；先检查工作空间只会把一个合法的附件任务误渲染成“未绑定错误”。直接在同一次 `open` 里登记全部附件。
+
 未绑定知识库的项目也能这样开始——"参考这两个文件写一篇"是完全正常的请求，为它索要一次绑定就是把五分钟的任务变成一次知识工程。缺到无法成稿时向老师要，不要自己去找。
 
 **二 · 项目还没有绑定知识库。** 先跑 `status` 确认，然后在访谈里问出知识库位置，一次问一件，问完再写配置：
 
 ```bash
-$BLUEINK status                      # 退出码 1 = 未绑定
+$BLUEINK status                      # 正常返回；读取 bound 判断是否绑定
 $BLUEINK bind --brand "<品牌>" --kb "<知识库目录绝对路径>" \
               [--official "<官网>"]
 $BLUEINK index

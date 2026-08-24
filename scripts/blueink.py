@@ -131,7 +131,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             payload["hint"],
             "只想参考几份指定文件、本次不用知识库：open --attach <文件绝对路径>。",
         ])
-        return 1
+        # status 只报告状态，不把“尚未绑定”伪装成命令失败。调用方需要分支时读取
+        # --json 的 bound 字段；非零退出码留给解析损坏、路径失效等真正异常。
+        return 0
     data = workspace.load(args.project)
     root = Path(str(data["kb_root"]))
     project = workspace.project_root(args.project)
