@@ -658,12 +658,12 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         "老师会开始敷衍，而敷衍的回答比没有回答更危险",
     ),
     (
-        "agent-dispatch",
+        "external-dispatch",
         "SKILL.md",
-        "不调用 Agent、Task、后台智能体、独立 `claude` 进程或其他模型会话。",
-        "可以调用 Agent、Task、后台智能体或独立模型会话。",
+        "disallowed-tools: Skill, Agent, Task",
+        "disallowed-tools: Bash",
         ["scripts/validate.py"],
-        "根入口允许外部 Agent 调度：单智能体运行合同失效",
+        "根入口不再机械禁用 Skill、Agent、Task：BlueInk 运行合同可能被旁路",
     ),
     (
         "stage-search-boundary",

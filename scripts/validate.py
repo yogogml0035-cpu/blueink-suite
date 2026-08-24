@@ -10,7 +10,7 @@
 - 技能本体是否混进了品牌语料或绝对路径（技能必须能整目录复制给另一位老师）；
 - 五项验收契约的名称有没有被悄悄改掉；
 - 复审日期是否已经越过声明的复审周期；
-- 默认生成是否明确单智能体、强制方向确认、先交可修改初稿并只保留四份产物；
+- 默认生成是否明确单 Skill、单智能体、强制方向确认、先交可修改初稿并只保留四份产物；
 - `evolve --correct` 的落点标题是否还在，以及它有没有跑回 `SKILL.md`（首读层是方法论）；
 - `blueink.py` 的每个参数是否在文档里出现过（**没被任何文档提到的参数等于运行时发现不了的能力**）。
 
@@ -87,6 +87,9 @@ def check(root: Path) -> list[str]:
                 "SKILL.md 缺 disable-model-invocation: true —— "
                 "「普通自然语言不承诺自动触发」只写在正文里是无效约束，正文要等调用之后才被读到"
             )
+        denied = set(re.split(r"[\s,]+", meta.get("disallowed-tools", "")))
+        if not {"Skill", "Agent", "Task"} <= denied:
+            problems.append("SKILL.md 必须用 disallowed-tools 机械禁用 Skill、Agent、Task")
         if not meta.get("description"):
             problems.append("SKILL.md 缺 description")
         unknown = sorted(set(meta) - CLAUDE_SKILL_FIELDS)
@@ -123,6 +126,8 @@ def check(root: Path) -> list[str]:
         skill_text = skill.read_text(encoding="utf-8")
         if "不调用 Agent、Task、后台智能体、独立 `claude` 进程或其他模型会话" not in skill_text:
             problems.append("SKILL.md 缺单智能体硬约束")
+        if "不调用 Skill 工具，不加载其他 Skill、斜杠命令或品牌写作助手" not in skill_text:
+            problems.append("SKILL.md 缺唯一 Skill 硬约束——显式入口仍可能被自动匹配的品牌 Skill 旁路")
 
     guide_root = root / "references"
     for guide, title in GUIDES.items():
@@ -152,7 +157,8 @@ def check(root: Path) -> list[str]:
             ("不在写作时重新检索、换主线或补事实", "默认生成允许成稿时重新选素材"),
             ("run.json", "默认生成缺新版聚合运行记录"),
             ("delivery.md", "默认生成缺业务交付文件"),
-            ("最终回复必须直接输出 `delivery.md` 的", "默认生成允许最终回复只给交付路径"),
+            ("不调用 Skill 工具，不加载其他 Skill、斜杠命令或品牌写作助手", "默认生成允许加载其他 Skill 旁路运行合同"),
+            ("最终回复的第一个可见区块必须是", "默认生成允许在交付正文前先报路径或过程说明"),
         ):
             if marker not in text:
                 problems.append(message)
