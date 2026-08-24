@@ -274,7 +274,7 @@ $BLUEINK retrieve --run <run_id> \
         [--include-instruction-artifacts]
 ```
 
-输出候选文件的路径、证据类型、stage、时间、摘要、`content_status` 和命中理由。**由当前智能体在证据研究阶段决定读哪几份**，检索不替它读。
+输出候选文件的路径、证据类型、stage、时间、摘要、`content_status` 和命中理由。**由当前智能体在扩展证据研究阶段决定读哪几份**，检索不替它读。
 
 `--track` 按三轨判据分别排序：
 

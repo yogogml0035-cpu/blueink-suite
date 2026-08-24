@@ -9,7 +9,7 @@ BlueInk 是一个面向汽车公关文案的证据驱动编辑决策 Skill。
 
 请把本仓库作为完整的 Claude Code 插件安装到当前用户环境。默认使用 `user` scope，使它能在该用户的不同项目中使用。
 
-安装时必须保留整个插件，不能只复制 `SKILL.md`。`references/stages/` 包含六个按需加载的阶段指导，`scripts/` 保存工作空间、索引、运行记录和审计能力。
+安装时必须保留整个插件，不能只复制 `SKILL.md`。`references/stages/` 包含四个核心阶段与两个条件阶段的指导；封闭附件默认不加载扩展证据研究，反馈归因只在真实反馈后加载。`scripts/` 保存工作空间、索引、运行记录和审计能力。
 
 ### 1. 检查环境
 
@@ -92,7 +92,7 @@ claude plugin details blueink-suite@blueink-suite
 - `blueink-suite@blueink-suite` 已安装、已启用，scope 为 `user`；
 - Claude Code 能识别 1 个 `blueink-suite` Skill；
 - 插件目录不存在根级 `agents/`，运行时只使用当前 `/blueink-suite` 智能体；
-- `references/stages/` 下的 6 份阶段指导完整可读；
+- `references/stages/` 下的 6 份阶段指导完整可读，运行协议明确“四个核心阶段＋两个条件阶段”；
 - 新开 Claude Code 会话后，显式入口 `/blueink-suite` 可用。
 
 如果当前会话没有刷新插件，先执行 `/reload-plugins`；仍不可用时新开 Claude Code 会话。若其他插件占用了同名裸命令，使用规范化入口：

@@ -8,9 +8,9 @@
 
 | 现象 | 首要责任 | 先看哪个文件 | 看什么 |
 |---|---|---|---|
-| 事实错了 | 证据研究阶段 | `evidence.json` | 这条事实的 `source` 和 `source_date` |
-| 关键资料漏了 | 证据研究阶段 | `evidence.json` | `discarded` 里是不是被误舍，`gaps` 里是不是标了但没人管 |
-| 来源不可靠 | 证据研究阶段 | `evidence.json` | 是否用了非白名单来源；`confidence: low` 的事实进了正文 |
+| 事实错了 | 证据整理；快线归编辑策略，扩展路径归证据研究 | `evidence.json` | 这条事实的 `source` 和 `source_date` |
+| 关键资料漏了 | 证据整理；快线归编辑策略，扩展路径归证据研究 | `evidence.json` | `discarded` 里是不是被误舍，`gaps` 里是不是标了但没人管 |
+| 来源不可靠 | 扩展证据研究 | `evidence.json` | 是否用了非白名单来源；`confidence: low` 的事实进了正文 |
 | 主线不对 | 编辑策略阶段 | `strategy.json` | `recommended_line.why` 站不站得住 |
 | 结构僵、像模板 | 编辑策略阶段 | `strategy.json` | `applicable_conventions` 里是不是把参考稿当纪律了 |
 | 信息权重失衡 | 编辑策略阶段 | `strategy.json` | `information_budget` 与 `material_plan.foreground` 的权重 |
@@ -56,7 +56,7 @@ $BLUEINK audit --run <run_id>
 | `A1 入口唯一` | `meta.json` 记录了 Claude Code 显式启动与 `run_id` | 缺 `meta.json`；`started_via` 不是 `/blueink-suite` 或规范化的 `/blueink-suite:blueink-suite`；缺 `run_id` |
 | `A2 单品牌隔离` | 所有 `read_paths` 落在 `kb_root` 内**或已登记的本次附件**内，且文件真实存在；无跨品牌实体 | 出现既不在 `kb_root`、也不在 `meta.task_attachments` 里的路径；相对路径含 `..`；**声称读过但文件不存在（等于凭空写出的引用）**；软链接指向库外；`verify.cross_brand` 非空 |
 | `A3 动态访谈` | 每轮恰好一个问题；有停止理由 | 某轮 `question` 含多个问号；缺 `stopped_because`；连续两轮 `changed` 为空 |
-| `A4 阶段边界` | 六份回执的 `role` 与阶段对应；成稿阶段未扫库；审查阶段未改稿 | 写作 `read_paths` 含未授权的库内文件；写作回执缺 `deviations` 字段；有正文却没有写作回执；`verify.json` / `adversary.json` 出现改写后的句子 |
+| `A4 阶段边界` | 当前路径所需回执的 `role` 与阶段对应；成稿阶段未扫库；审查阶段未改稿 | 写作 `read_paths` 含未授权的库内文件；写作回执缺 `deviations` 字段；有正文却没有写作回执；`verify.json` / `adversary.json` 出现改写后的句子 |
 | `A5 输出有效` | 无 `unsourced`；来源清单是**真的被打开过的**文件的子集；核对卡结论口径正确 | `coverage.unsourced > 0`；`sources_used` 出现只在检索候选里出现过、没被任何角色打开的文件；结论行与 `verdict` 不一致；`delivery.md` 泄漏技术轨迹 |
 
 输出：
@@ -141,10 +141,10 @@ $BLUEINK audit --run <run_id>
 
 **单智能体阶段切换**
 
-- **根级 `agents/` 必须不存在。** 一旦出现，Claude Code 会重新注册子智能体，中转站兼容问题就回来了。运行 `python3 scripts/validate.py .` 会直接报错。
+- **插件根目录不包含 `agents/`。** 阶段指导统一位于 `references/stages/`；运行 `python3 scripts/validate.py .` 会检查目录结构。
 - **阶段产物先落盘再继续。** 会话中断时用 `doctor` 与运行目录定位最后一个可用产物，只重做缺失、损坏或 `blocked` 的阶段。
-- **进入阶段时只加载对应指导。** 六份指导一次全读会让禁止项互相覆盖；路由见《单智能体阶段执行协议》。
-- **成稿、策略和来源核验阶段不得新增检索。** 工具仍然可见，这是执行合同而不是权限隔离；发现缺事实时退回证据阶段，不在当前阶段补。
+- **先选路由，再加载指导。** 封闭文本附件默认直接进入编辑策略，由该阶段先落轻量 `evidence.json`；不要为了走齐六份指导而加载证据研究。反馈阶段同样只在真实反馈后加载。
+- **成稿、策略和来源核验阶段不得新增检索。** 工具仍然可见，这是执行合同而不是权限隔离；策略快线只能整理登记附件，确需新增资料才切到扩展证据研究。
 - **A/B 不宣称独立或盲评。** 两条主线必须先写清唯一的关键差异；同一智能体顺序成文并做对抗比较。
 
 **审计与测试**
@@ -204,6 +204,6 @@ $BLUEINK memory add --scope methodology \
 
 `python3 scripts/evolve.py --correct "<它哪里错了>"` 会把一条使用反馈原样追加到这里，同时写进 `EVOLUTION.md` 作为证据。
 
-**它刻意不写进 `SKILL.md`。** 首读层是方法论；把每次使用中发现的具体现象往那里堆，几个月后它就会变成一份操作手册——而这套系统存在的理由恰恰是不做操作手册。这里是它们的正确落点：遇到行为不符合预期时，人本来就会来读这一份。
+具体环境现象集中记录在本手册。`SKILL.md` 只保留核心命题、运行边界和按需读取入口，避免首读内容被故障细节占满。
 
 原样保留使用者的措辞，避免转述丢失当时的任务条件与可观察现象。是否形成正式约束，必须由独立评审决定。

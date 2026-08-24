@@ -10,7 +10,7 @@
                 解释器时，用它真跑一遍状态层与管线检查
     --claims    声明一致性：文档里的数字、子命令面、边界清单、留存策略、脚本
                 清单必须与代码实际一致，**双向**核对
-    --mutation  变异承重：真的往技能副本里注入十个已知失败形态，断言每一个都
+    --mutation  变异承重：往技能副本里注入十一个已知失败形态，断言每一个都
                 会让指定检查转红
 
 不给参数就三道全跑。退出码 0 表示全过。
@@ -662,10 +662,10 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     (
         "agent-dispatch",
         "references/stage-execution-protocol.md",
-        "**不得调用 Agent、Task、子智能体或 `claude --agent`。**",
-        "**允许在必要时调用 Agent、Task 或子智能体。**",
+        "**运行期间只使用当前 `/blueink-suite` 会话。**",
+        "**运行期间可以调用 Agent、Task 或子智能体。**",
         ["scripts/validate.py"],
-        "阶段协议重新允许 Agent 调度：中转站不兼容问题会重新进入运行主干",
+        "阶段协议允许外部 Agent 调度：单会话运行合同失效",
     ),
     (
         "stage-search-boundary",
@@ -678,10 +678,18 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     (
         "independence-honesty",
         "references/stage-execution-protocol.md",
-        "不声称来源核验或编辑红队是独立评审",
+        "来源核验与编辑红队属于同一会话内的受限输入复核",
         "来源核验和编辑红队是独立评审",
         ["scripts/validate.py"],
         "同一上下文里的复核被重新包装成独立评审，能力边界变成虚假承诺",
+    ),
+    (
+        "product-voice",
+        "references/stage-execution-protocol.md",
+        "## 二 · 运行能力边界",
+        "## 二 · 什么被保留，什么不再声称",
+        ["scripts/validate.py"],
+        "用户可见阶段协议混入实现变化说明：产品表达不再是当前时态",
     ),
 ]
 

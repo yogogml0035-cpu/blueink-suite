@@ -5,7 +5,7 @@
 目录名对不对）。这里检查的是**本技能特有的、一旦破掉就会静默失效的东西**：
 
 - 入口是否真的机械关闭了模型自动调用（散文声明不算）；
-- 根级 ``agents/`` 是否不存在，六份阶段指导是否完整；
+- 根级 ``agents/`` 是否不存在，四个核心阶段与两个条件阶段的指导是否完整；
 - 文档里引用的文件是否真的存在（断链的"按需读取"等于没有那一节）；
 - 技能本体是否混进了品牌语料或绝对路径（技能必须能整目录复制给另一位老师）；
 - 五项验收契约的名称有没有被悄悄改掉；
@@ -14,7 +14,7 @@
 - `evolve --correct` 的落点标题是否还在，以及它有没有跑回 `SKILL.md`（首读层是方法论）；
 - `blueink.py` 的每个参数是否在文档里出现过（**没被任何文档提到的参数等于运行时发现不了的能力**）。
 
-后四条都是从真实失败里补出来的，见 DESIGN_NOTES.md。
+产品特有约束与验证边界见 DESIGN_NOTES.md。
 
 用法：``python3 scripts/validate.py [技能目录]``；退出码 0 通过、1 有问题。
 """
@@ -158,16 +158,32 @@ def check(root: Path) -> list[str]:
     else:
         protocol_text = protocol.read_text(encoding="utf-8")
         for marker, message in (
-            ("不得调用 Agent、Task、子智能体或 `claude --agent`", "协议缺禁止多智能体调度的硬约束"),
-            ("共享在同一个上下文中", "协议没有声明上下文与工具共享"),
-            ("不声称来源核验或编辑红队是独立评审", "协议仍可能把同一执行者伪装成独立评审"),
-            ("不是上下文清除或权限隔离", "协议没有区分输入合同与真实权限隔离"),
+            ("运行期间只使用当前 `/blueink-suite` 会话", "协议缺单会话执行约束"),
+            ("阶段之间共享同一会话上下文和宿主工具", "协议没有声明上下文与工具共享"),
+            ("来源核验与编辑红队属于同一会话内的受限输入复核", "协议没有声明受限输入复核的能力边界"),
+            ("这张表是**推理输入合同**", "协议没有定义阶段输入合同"),
+            ("封闭附件快线（默认）", "协议没有把封闭附件快线设为默认路径"),
+            ("扩展证据路径（条件触发）", "协议没有把证据研究限制为条件路径"),
         ):
             if marker not in protocol_text:
                 problems.append(message)
         for forbidden in ("subagent_type", "run_in_background", "ANTHROPIC_BASE_URL", "output_config.format"):
             if forbidden in protocol_text:
                 problems.append(f"单智能体协议仍含多智能体运行路径：{forbidden}")
+
+    strategy = stage_root / "editorial-strategy.md"
+    if strategy.is_file():
+        strategy_text = strategy.read_text(encoding="utf-8")
+        for marker, message in (
+            ("## 轻量证据整理（只在封闭附件快线）", "编辑策略指导缺快线证据整理入口"),
+            ("先写 `.blueink/runs/<run_id>/evidence.json`", "快线没有先落 evidence.json 再做策略"),
+        ):
+            if marker not in strategy_text:
+                problems.append(message)
+
+    evidence_stage = stage_root / "evidence-research.md"
+    if evidence_stage.is_file() and "本阶段不是默认路径" not in evidence_stage.read_text(encoding="utf-8"):
+        problems.append("证据研究指导没有声明为条件路径——运行可能重新退化成每次全量取证")
 
     # --- 文档断链 ---
     # 只检查看起来是"技能内相对路径"的引用。文档里也会出现知识库里的路径
@@ -265,12 +281,20 @@ def product_voice(root: Path) -> list[str]:
         r"破坏性变更", r"第\s*\d+\s*轮(?:审查|修改|迭代)",
         r"(?:旧版|老版本)(?:逻辑|实现)", r"(?:已经|已)(?:删除|移除)",
         r"(?:之前|此前)版本", r"迁移自旧版", r"曾经实现",
+        r"什么被保留，什么不再声称", r"不再声称", r"兼容既有", r"兼容审计",
+        r"被否掉的(?:方案|替代方案)", r"旧前提|新前提", r"中转站",
+        r"一次真实(?:失败|教训)", r"从一次真实运行", r"真实教训",
+        r"这里合并的是.+不是删除", r"(?:实现|架构)(?:演进|迁移)",
     )
     docs = [
         root / "SKILL.md", root / "README.md", root / "CHANGELOG.md",
         root / "DESIGN_NOTES.md", root / "DECISIONS.md", root / "EVOLUTION.md",
+        root / ".claude-plugin" / "plugin.json",
+        root / ".claude-plugin" / "marketplace.json",
         *sorted((root / "references").rglob("*.md")),
         *sorted((root / "assets").glob("*.md")),
+        *sorted((root / "assets").glob("*.json")),
+        *sorted((root / "assets").glob("*.yaml")),
         *sorted((root / "evals").glob("*.md")),
     ]
     problems: list[str] = []
@@ -372,13 +396,7 @@ def stage_contract_fields(root: Path) -> list[str]:
 
 
 def review_due(root: Path, today: date | None = None) -> list[str]:
-    """`last_reviewed` 是否已经超过 `review_interval_days`。
-
-    这原来是四个模块（review_staleness / dependency_health / schema_drift /
-    staleness_check，共 695 行）做的一件事。另外三个模块探测的是本技能根本没有
-    声明的 HTTP 依赖和 API schema——通用技能工厂需要它们，BlueInk 不需要。
-    留下的只有真正会过期的那一项：复审日期。
-    """
+    """检查 `last_reviewed` 是否超过 `review_interval_days`。"""
     skill = root / "SKILL.md"
     if not skill.is_file():
         return []

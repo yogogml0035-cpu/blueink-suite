@@ -1,6 +1,6 @@
 {
   "name": "blueink-suite",
-  "description": "仅适用于 Claude Code 的汽车公关文案生成能力：单品牌知识库，一个智能体按阶段执行，出问题可定位到具体阶段与文件。",
+  "description": "仅适用于 Claude Code 的汽车公关文案生成能力：单品牌知识库，一个智能体按需分阶段执行，默认快线不做全量证据研究。",
   "owner": {
     "name": "新蓝标数字 · 汽车事业群 · AI 内容中台"
   },
