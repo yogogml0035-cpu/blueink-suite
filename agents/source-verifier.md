@@ -3,6 +3,7 @@ name: source-verifier
 description: 蓝墨来源核验员。逐项核对稿件中的事实表达是否有来源、来源是否对应、时效是否有效、是否混入其他品牌信息。只回答"有没有依据"，不评价文章好不好，不直接改稿。
 tools: Read, Write
 model: inherit
+background: false
 ---
 
 # 来源核验员

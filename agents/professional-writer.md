@@ -3,6 +3,7 @@ name: professional-writer
 description: 蓝墨专业写作者。只接收主智能体已确认的"本次写作程序"并生成正文，不重新扫描知识库、不擅自改变主线、不自行补充事实。A/B 模式下由两个互相隔离的实例分别执行推荐主线与备选主线。
 tools: Read, Write
 model: inherit
+background: false
 ---
 
 # 专业写作者

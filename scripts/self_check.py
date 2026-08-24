@@ -10,7 +10,7 @@
                 解释器时，用它真跑一遍状态层与管线检查
     --claims    声明一致性：文档里的数字、子命令面、边界清单、留存策略、脚本
                 清单必须与代码实际一致，**双向**核对
-    --mutation  变异承重：真的往技能副本里注入七个已知失败形态，断言每一个都
+    --mutation  变异承重：真的往技能副本里注入十个已知失败形态，断言每一个都
                 会让指定检查转红
 
 不给参数就三道全跑。退出码 0 表示全过。
@@ -658,6 +658,30 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         ["scripts/test_state.py"],
         "问题归一化带上对象身份：同一个问题问两遍不再算重复，"
         "老师会开始敷衍，而敷衍的回答比没有回答更危险",
+    ),
+    (
+        "agent-background",
+        "agents/evidence-researcher.md",
+        "background: false",
+        "background: true",
+        ["scripts/validate.py"],
+        "取证角色重新允许后台默认：关键回执变成异步依赖，主智能体可能轮询空文件并让界面假死",
+    ),
+    (
+        "evidence-write",
+        "agents/evidence-researcher.md",
+        "tools: Read, Write, Grep, Glob, Bash, PowerShell, WebFetch, WebSearch",
+        "tools: Read, Grep, Glob, Bash, PowerShell, WebFetch, WebSearch",
+        ["scripts/validate.py"],
+        "取证角色被要求生成 evidence.json 却失去原生 Write：任务契约与可用能力不再闭合",
+    ),
+    (
+        "provider-fallback",
+        "references/orchestration-protocol.md",
+        "`output_config.format` 与 `Extra inputs are not permitted`",
+        "`output_config.unknown` 与 `Extra inputs are not permitted`",
+        ["scripts/validate.py"],
+        "自定义中转拒绝 Agent 结构化参数时没有 CLI 角色降级，主流程只会在同一错误上反复等待",
     ),
 ]
 

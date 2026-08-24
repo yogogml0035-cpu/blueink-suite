@@ -20,6 +20,8 @@
 | 跨品牌信息没拦住 | 来源核验员 | `verify.json` | `cross_brand` 是否为空但正文里确有 |
 | 方向明显不对却没人反对 | 编辑反方 | `adversary.json` | `attacks` 是不是全是轻微项，`missed_stronger_line` 是不是漏了 |
 | 老师的反馈没生效 | 反馈归因员 / 记忆 | `feedback.json`、`learning/memory.json` | 归成了哪一级、置信度够不够、是否还在 `pending_confirmation` |
+| 子智能体迟迟不返回 | 编排 / 宿主运行时 | Agent 工具结果、预期回执 | 是否被异步启动；是否出现 Bash `sleep`/轮询；`expect` 文件是否落盘 |
+| `/blueink-suite` 变成 Unknown command | Claude Code 插件状态 | `claude plugin list --json` | 插件是未安装，还是仍在但 `enabled: false` |
 | **完全没有这些文件** | 没有创建运行记录 | `.blueink/runs/` | 是否用 `open` 创建了本次 `run_id` |
 
 最后一行说明当前没有可审计的 BlueInk 运行。先确认本次是否通过显式入口创建了 `run_id`，不要把无运行记录的输出当成已审计结果。
@@ -140,9 +142,13 @@ $BLUEINK audit --run <run_id>
 
 **子智能体调用**
 
-- **产回执的调用一律放前台。** 运行时对后台任务有等待上限（Claude Code 默认 600 秒）。跑满就被终止，回执没落盘等于这一段全部作废。取证和并行放后台的两个策略师实例都撞过这条线。
+- **产回执的调用必须显式 `run_in_background: false`。** 六个角色的 frontmatter 也必须是 `background: false`。只在文档里写“放前台”而不设置运行参数，宿主仍可能按会话默认值把它转成异步任务。
+- **宿主仍返回异步时，不要用 Bash 的 `sleep`、循环检查文件或读取子智能体 transcript/output。** 这些动作只会占住前台，让“子智能体异常”看起来像“主智能体还在工作”。停止依赖步骤，说明完成通知到达后继续；通知到达后先检查 `expect` 文件。会话被中断且回执没落盘时，只重跑当前角色。
+- **错误同时含 `output_config.format` 与 `Extra inputs are not permitted` 时，不要换子智能体模型反复试。** 真实测试里 Opus 4.8 与 Sonnet 5 都在公司中转后的 Bedrock 请求上被拒；改用编排协议里的独立 `claude --agent` 角色进程，并显式 `--model opus`。这条路径已用两份真实财报附件验证能落 `evidence.json`。
+- **`ANTHROPIC_BASE_URL` 指向自定义中转时，在第一次角色调用前就走 CLI 角色路径。** 只判断主机名，不打印 token、header 或完整设置；不要每个新会话都先重演一次已知 400 才降级。
+- **取证员必须有原生 `Write`。** 它既被要求生成 `evidence.json`，又只有读取／检索工具时，回执契约在能力层就不闭合；不要指望它用 Bash 临时拼接 JSON。
 - **任务单必须给 `skill_root`。** 角色需要读 references（策略师要读《品类任务边界》）。不给它，子智能体只能在项目目录里逐个猜路径，可能连试七个不存在的路径才放弃。
-- **A/B 的两个实例前台顺序跑。** 隔离要求的是上下文互不可见，不是并发。
+- **A/B 的两个实例同步顺序跑。** 隔离要求的是上下文互不可见，不是并发。
 
 **审计与测试**
 
@@ -173,6 +179,9 @@ $BLUEINK purge --keep-runs 5  --apply   # 改"无论多旧至少保留几次"
 
 ## 常见误判
 
+- **"Unknown command 说明 Skill 文件被删了"** → 先看 `claude plugin list --json`。如果 `blueink-suite@blueink-suite` 仍在但 `enabled: false`，文件没有丢；执行 `claude plugin enable blueink-suite@blueink-suite --scope user`，再新开会话。只有列表里根本没有它时才重装。
+- **"子智能体没回消息，所以继续轮询文件就行"** → 轮询不会修复模型请求，只会制造第二个前台阻塞。看 Agent 工具是否明确返回异步、预期回执是否存在；不存在就把当前阶段判为中断，收到通知后继续或只重跑这一段。
+- **"换成 Sonnet 就能修复 Bedrock 400"** → 只有 `modelUsage` 能证明真实路由；角色 frontmatter 和 Agent 参数都可能被 `CLAUDE_CODE_SUBAGENT_MODEL` 覆盖。即使真实切到 Sonnet，同一 `output_config.format` 错误仍可能出现。命中精确错误后直接走 CLI 角色降级，不继续烧重试时间。
 - **"检索返回空，索引质量有问题"** → 先跑 `doctor`。九成是 `kb_root` 路径失效或还没建索引。
 - **"这条记忆明明有，为什么没生效"** → 两种常见原因：`confidence` 低于 0.65，只作推荐；`status: pending_confirmation`，还没确认生效。
 - **"审计过了但稿子很差"** → 审计只验流程契约。稿子差要么是素材质量问题（承认它，靠反馈迭代），要么是编辑判断差（查 `adversary.json` 为什么没打出来）。

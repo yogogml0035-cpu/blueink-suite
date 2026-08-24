@@ -156,6 +156,37 @@ def check(root: Path) -> list[str]:
                 problems.append(
                     f"agents/{role}.md 缺 tools —— 没有工具白名单时角色边界只能靠自律"
                 )
+            elif "Write" not in re.split(r"[\s,]+", meta["tools"]):
+                problems.append(
+                    f"agents/{role}.md 缺 Write —— 角色被要求落回执，却没有原生写入能力"
+                )
+            if meta.get("background") != "false":
+                problems.append(
+                    f"agents/{role}.md 必须显式 background: false —— "
+                    "回执是串行依赖，不能把宿主默认值当成前台保证"
+                )
+
+    protocol = root / "references" / "orchestration-protocol.md"
+    if protocol.is_file():
+        protocol_text = protocol.read_text(encoding="utf-8")
+        if "`run_in_background: false`" not in protocol_text:
+            problems.append(
+                "编排协议没有显式要求 run_in_background: false —— 只写“前台”不能约束 Agent 工具"
+            )
+        if "不许用 Bash 轮询伪装成同步" not in protocol_text:
+            problems.append(
+                "编排协议缺异步降级规则 —— 子智能体异常时可能再次用 sleep 轮询把故障藏住"
+            )
+        if not all(
+            marker in protocol_text
+            for marker in (
+                "ANTHROPIC_BASE_URL", "output_config.format",
+                "Extra inputs are not permitted", "--agent",
+            )
+        ):
+            problems.append(
+                "编排协议缺自定义中转兼容降级 —— Bedrock 拒绝结构化参数时会重复卡在原生 Agent"
+            )
 
     # --- 文档断链 ---
     # 只检查看起来是"技能内相对路径"的引用。文档里也会出现知识库里的路径

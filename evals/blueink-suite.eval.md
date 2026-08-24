@@ -32,11 +32,11 @@ python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致
 
 **状态层回归检查**（`state-layer` / `explicit-entry` / `role-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计和附件登记，共 173 项。
 
-**自证检查**（`self-claims` / `self-mutation` / `pipeline-wiring`）验的是"声明与实际是否一致"这一类不会报错的漂移。其中 `self-mutation` 是这份规格里唯一的**负向**检查：它真的往技能副本里注入七个已知失败形态，断言每一个都会让指定检查转红。
+**自证检查**（`self-claims` / `self-mutation` / `pipeline-wiring`）验的是"声明与实际是否一致"这一类不会报错的漂移。其中 `self-mutation` 是这份规格里唯一的**负向**检查：它真的往技能副本里注入十个已知失败形态，断言每一个都会让指定检查转红。
 
 理由要说清楚。一段声称能抓住错误的检查，在它从没被喂过错误输入的情况下，和一段 `return True` 无法区分——"我们做过变异测试"如果只是 README 里的一句话，它证明不了任何事。变异靶点找不到时判**失败**而不是跳过：一个打不进去的变异什么都没测到，却会让这道门继续显示绿色。
 
-七个变异里有四个锁的是这套系统最实质的保证，而它们退化时**症状都是静默的**：`index-hash` 把增量索引改成按 size+mtime 判断复用，文件被同长度改写并恢复修改时间后就会漏更新，检索永远拿不到新内容且不报错；`instruction-artifact` 把技能包隔离退化成只挡入口文件，其 `references/` 里的固定模板于是重新进入检索，让"新闻稿必须先铺垫行业背景"这类固定模板接管本次判断；`sufficiency-dimensions` 让停止理由只要非空就算指名了维度，于是一句"信息已经足够"照样过审，而那句话对任何一次访谈都成立；`duplicate-question` 让同一个问题问两遍不再算重复，老师会开始敷衍，而敷衍的回答比没有回答更危险。
+十个变异里有七个锁的是这套系统最实质的保证，而它们退化时**症状都是静默的**：`index-hash` 把增量索引改成按 size+mtime 判断复用，文件被同长度改写并恢复修改时间后就会漏更新，检索永远拿不到新内容且不报错；`instruction-artifact` 把技能包隔离退化成只挡入口文件，其 `references/` 里的固定模板于是重新进入检索，让"新闻稿必须先铺垫行业背景"这类固定模板接管本次判断；`sufficiency-dimensions` 让停止理由只要非空就算指名了维度，于是一句"信息已经足够"照样过审，而那句话对任何一次访谈都成立；`duplicate-question` 让同一个问题问两遍不再算重复，老师会开始敷衍；`agent-background` 让关键回执重新受后台默认支配；`evidence-write` 让取证员失去生成回执所需的原生写入能力；`provider-fallback` 让中转兼容错误重新陷入无效重试。
 
 ## 十三个 golden 用例
 
@@ -136,7 +136,7 @@ python3 scripts/evolve.py                                # 一次跑完上面全
      "cmd": "python3 scripts/test_state.py"},
     {"id": "self-claims", "text": "声明与实际一致：文档里的检查项数、子命令面、边界清单、留存策略、脚本清单双向核对，且 Python 底线在底线版本上真的跑得起来", "type": "command",
      "cmd": "python3 scripts/self_check.py --compat --claims"},
-    {"id": "self-mutation", "text": "七个已知失败形态注入技能副本后，每一个都让指定检查转红；靶点失效判失败而不是跳过", "type": "command",
+    {"id": "self-mutation", "text": "十个已知失败形态注入技能副本后，每一个都让指定检查转红；靶点失效判失败而不是跳过", "type": "command",
      "cmd": "python3 scripts/self_check.py --mutation"},
     {"id": "pipeline-wiring", "text": "全部脚本可编译，第三方依赖已声明，单一编排入口存在", "type": "command",
      "cmd": "python3 scripts/check_pipeline.py ."},

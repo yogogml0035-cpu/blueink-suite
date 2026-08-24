@@ -100,6 +100,15 @@ claude plugin details blueink-suite@blueink-suite
 /blueink-suite:blueink-suite
 ```
 
+如果新会话直接显示 `Unknown command`，先区分“被禁用”和“未安装”，不要直接重装：
+
+```bash
+claude plugin list --json
+claude plugin enable blueink-suite@blueink-suite --scope user
+```
+
+列表里仍有插件但 `enabled: false` 时，第二条命令恢复启用，然后新开会话；列表里根本没有插件时才回到第 3 步安装。插件被禁用时 `claude plugin details` 也可能返回 `not found`，所以状态判断以 `plugin list --json` 为先。
+
 验收后向用户报告 Claude Code 版本、Python 版本、安装 scope、插件版本和可用入口。不要把“命令执行无报错”单独当成安装成功。
 
 ## Marketplace 不可用时的备用安装
