@@ -172,6 +172,7 @@ def open_run(
     evidence_boundary: str | None = None,
     brand: str | None = None,
     started_via: str = ENTRY,
+    one_off: bool = False,
 ) -> dict[str, Any]:
     """开一次运行并返回 meta。
 
@@ -182,9 +183,9 @@ def open_run(
     两种情况允许在未绑定工作空间的项目里开启运行：
 
     - ``绑定`` 模式：这一次运行的任务就是完成绑定。
-    - **老师本次显式给了附件**：此时证据边界就是这几份文件，不需要品牌知识库。
-      老师说"参考这两个文件写一篇"是完全正常的请求，为它强制先做一次绑定，等于
-      为一个五分钟的任务索要一次知识工程。
+    - **老师明确确认本次只用附件**：调用方传入 ``one_off=True``，此时证据边界
+      就是这几份文件，不建立长期品牌知识库。显式确认是为了避免附件让首次资料源
+      询问被静默跳过。
 
     除此之外一律拒绝，避免创建没有可用证据边界的运行记录。
     """
@@ -199,21 +200,29 @@ def open_run(
 
     bound = workspace.is_bound(start)
     attach_only = bool(attachments) and not bound
-    if not bound and mode != "绑定" and not attach_only:
-        raise workspace.WorkspaceError(
-            f"当前项目未绑定品牌知识库，且本次没有给任何附件，无法以「{mode}」模式启动。\n"
-            f"两条出路，选一条：\n"
-            f"  1. 绑定这个品牌的知识库："
-            f"blueink.py bind --brand <品牌> --kb <知识库目录>"
-            f"（还没有目录时加 --create 让它建出来）\n"
-            f"  2. 本次只参考指定文件，不用知识库：open --mode {mode} --attach <文件绝对路径>"
-        )
     if mode == "绑定" and attachments:
         # 绑定模式没有本次任务，附件无处可用；而它的品牌归属只能记成"未绑定"，
         # 那是一条毫无意义又看起来正常的记录。宁可在这里拒绝。
         raise workspace.WorkspaceError(
             "绑定模式不接受 --attach：这一次运行没有本次任务，附件的品牌归属只能记成"
             "「未绑定」。先完成 bind，再以「生成」或「学习」模式开启带附件的运行。"
+        )
+    if one_off and not attach_only:
+        raise workspace.WorkspaceError(
+            "--one-off 只用于未绑定项目里的单次附件任务；已绑定项目或没有附件时不要使用。"
+        )
+    if not bound and mode != "绑定" and not attach_only:
+        raise workspace.WorkspaceError(
+            f"当前项目尚未绑定品牌历史稿件根目录，无法以「{mode}」模式启动。\n"
+            "请先向老师只问一次：这个品牌所有过往稿件所在的共同根目录绝对路径是什么？\n"
+            "拿到路径后运行：blueink.py bind --brand <品牌> --kb <共同根目录>，再运行 index。"
+        )
+    if attach_only and not one_off:
+        raise workspace.WorkspaceError(
+            "当前项目尚未绑定品牌历史稿件根目录，不能因为本次带了附件就静默跳过首次询问。\n"
+            "请先向老师只问一次：这个品牌所有过往稿件所在的共同根目录绝对路径是什么？\n"
+            "拿到路径后运行 bind 与 index；如果老师明确回复「本次只用附件」，"
+            "再用 open --one-off --attach <文件绝对路径> 开启本次任务。"
         )
 
     brand_name = brand_key = "未绑定"
@@ -238,7 +247,7 @@ def open_run(
                     f"知识库路径或确认集合层启发式误判。"
                 )
         brand_name, brand_key = str(ws["brand"]), str(ws["brand_key"])
-        kb = str(ws["kb_root"])
+        kb = str(workspace.kb_root(start))
     elif attach_only and brand:
         # 没有知识库时，本次品牌只是一个标签：没有任何绑定可以与它冲突。
         # 照记下来，因为交付和审计都要知道这一稿写的是谁。
@@ -423,6 +432,45 @@ def draft_risk_sentences(draft: str) -> list[dict[str, Any]]:
     return risks
 
 
+def _validate_style_refs(value: Any, meta: dict[str, Any]) -> list[dict[str, str]]:
+    """校验本次真正打开的历史稿件；它们只提供风格，不进入事实来源。"""
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 3:
+        raise ValueError("style_refs 必须是数组且最多 3 条")
+    kb_root = str(meta.get("kb_root") or "")
+    if value and not kb_root:
+        raise ValueError("未绑定品牌知识库时不能登记历史风格参考")
+    root = Path(kb_root).expanduser().resolve() if kb_root else None
+    refs: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"style_refs[{index}] 必须是对象")
+        raw = str(item.get("path") or "").strip()
+        why = str(item.get("why") or "").strip()
+        if not raw or not why:
+            raise ValueError(f"style_refs[{index}] 必须包含 path 和 why")
+        try:
+            path = Path(raw).expanduser()
+            resolved = ((root / path) if root is not None and not path.is_absolute() else path).resolve()
+        except (OSError, RuntimeError) as exc:
+            raise ValueError(f"style_refs[{index}].path 无法解析：{raw}（{exc}）") from exc
+        if root is None or not resolved.is_file() or not workspace.within(resolved, root):
+            raise ValueError(f"style_refs[{index}].path 不存在或越过绑定知识库：{raw}")
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        caveat = str(item.get("caveat") or "").strip() or "只参考表达，不作为事实来源"
+        refs.append({
+            "path": resolved.relative_to(root).as_posix(),
+            "why": why,
+            "caveat": caveat,
+        })
+    return refs
+
+
 def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("decision 输入顶层必须是对象")
@@ -431,6 +479,7 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     direction = payload.get("direction")
     facts = payload.get("facts")
     decision = payload.get("decision")
+    style_refs = _validate_style_refs(payload.get("style_refs"), meta)
     if not isinstance(interview, dict) or not isinstance(interview.get("rounds"), list):
         raise ValueError("decision.interview.rounds 必须是数组")
     rounds = interview["rounds"]
@@ -482,6 +531,8 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     if attachment_fast_path:
         facts = []
         decision = {"path": "attachment-delivery-first"}
+        if style_refs:
+            decision["style_refs"] = style_refs
     elif not isinstance(facts, list) or len(facts) > 12:
         raise ValueError("facts 必须是数组且最多 12 条")
     if meta.get("mode") == "生成" and not facts and not attachment_fast_path:
@@ -519,6 +570,9 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
                       "material_plan", "information_budget", "expression_bounds", "assumptions"):
             if field not in decision:
                 raise ValueError(f"decision.decision 缺字段 {field}")
+        if style_refs:
+            decision = dict(decision)
+            decision["style_refs"] = style_refs
     return {
         "interview": interview,
         "direction": direction,
@@ -833,6 +887,17 @@ def build_delivery_check(run_id: str, start=None) -> Path:
         date = str(item.get("date") or "").strip()
         source_lines.append(f"- {kind}：{label}" + (f"（{date}）" if date else ""))
 
+    style_lines: list[str] = []
+    decision = meta.get("decision")
+    if isinstance(decision, dict):
+        for item in decision.get("style_refs") or []:
+            if not isinstance(item, dict):
+                continue
+            label = Path(str(item.get("path") or "")).name
+            why = str(item.get("why") or "历史稿件")
+            caveat = str(item.get("caveat") or "只参考表达，不作为事实来源")
+            style_lines.append(f"- {label}：{why}；{caveat}")
+
     card = f"{verify['verdict']}。"
     if issues:
         card += "\n" + "\n".join(issues[:5])
@@ -843,6 +908,7 @@ def build_delivery_check(run_id: str, start=None) -> Path:
         + card
         + "\n\n## 实际来源\n\n"
         + "\n".join(source_lines)
+        + (("\n\n## 风格参考\n\n" + "\n".join(style_lines)) if style_lines else "")
         + "\n"
     )
     target = run_dir / "delivery-check.md"

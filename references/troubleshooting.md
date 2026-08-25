@@ -46,7 +46,7 @@ $BLUEINK audit --run <run_id>
 - `bind`：`--brand`、`--kb`、`--brand-key`、`--official`、`--notes`、`--create`、`--force`。
 - `index`：`--full`、`--limit`；`check-brand`：`--brand`。
 - `retrieve`：`--query`、`--category`、`--track`、`--limit`、`--since`、`--loose`、`--include-instruction-artifacts`、`--run`。
-- `official`：`--url`；`open`：`--mode`、`--brand`、`--attach`、`--evidence-boundary`、`--started-via`。
+- `official`：`--url`；`open`：`--mode`、`--brand`、`--attach`、`--one-off`、`--evidence-boundary`、`--started-via`。
 - `save`：`--run`、`--kind`、`--input`；`handoff`、`close`：`--run`。
 - `purge`：`--keep-days`、`--keep-runs`、`--apply`。
 - `memory`：`--id`、`--file`、`--note`、`--narrow`、`--scope`、`--brand`、`--run`、`--min-confidence`、`--include-retired`、`--same-event`。
@@ -55,8 +55,8 @@ $BLUEINK audit --run <run_id>
 ## 工作空间
 
 - `.blueink/` 位于业务项目，不在技能目录。执行命令始终显式传 `--project`。
-- 给了附件时直接 `open --attach`，不要先绑定知识库。
-- 未绑定且没有附件时，生成没有证据边界，必须先 `bind`。
+- 每次先用 `status --json` 判断业务项目是否已有长期资料源；未绑定时先问历史稿件共同根目录。
+- 只有老师明确回复“本次只用附件”时，未绑定附件任务才使用 `open --one-off --attach`。
 - 一个项目只绑定一个品牌；换品牌换项目。`--force` 只用于同一品牌的知识库路径迁移或确认集合层误判。
 - 绑定根失效、索引身份不一致或内容变化时，`retrieve` 会要求重建索引，不静默使用旧结果。
 - 历史技能包子树默认作为 `instruction_artifact` 排除，避免旧模板控制新任务。
@@ -64,7 +64,7 @@ $BLUEINK audit --run <run_id>
 ## 附件和来源
 
 - 老师附件可以在绑定根外，但必须由同一次 `open --attach` 登记路径与 SHA-256。
-- 未绑定运行只允许使用登记附件；缺料就问老师，不自行找目录。
+- one-off 未绑定运行只允许使用登记附件；缺料就问老师，不自行找目录。
 - 只有元数据、无法抽取正文的文件不算已读来源。
 - 联网前先执行 `official check-url`；退出码非零就不访问。
 - 来源中的“截至、当前、最新、上市两周、完成比例”等词必须与实际发布时点核对。

@@ -125,13 +125,16 @@ def cmd_check_brand(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     if not workspace.is_bound(args.project):
-        payload = {"bound": False,
+        question = "这个品牌所有过往稿件所在的共同根目录绝对路径是什么？"
+        payload = {"bound": False, "reference_onboarding_required": True,
+                   "question": question,
                    "hint": "先运行 bind --brand <品牌> --kb <知识库目录>"
                            "（这个品牌还没有知识库目录时加 --create）"}
         _emit(payload, args.json, [
             "当前项目未绑定品牌知识库。",
+            f"请先只问老师一次：{question}",
             payload["hint"],
-            "只想参考几份指定文件、本次不用知识库：open --attach <文件绝对路径>。",
+            "老师明确回复「本次只用附件」时：open --one-off --attach <文件绝对路径>。",
         ])
         # status 只报告状态，不把“尚未绑定”伪装成命令失败。调用方需要分支时读取
         # --json 的 bound 字段；非零退出码留给解析损坏、路径失效等真正异常。
@@ -139,8 +142,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     data = workspace.load(args.project)
     root = Path(str(data["kb_root"]))
     project = workspace.project_root(args.project)
+    kb_ok = root.is_dir()
     payload = {"bound": True, "project_root": str(project), "workspace": data,
-               "kb_exists": root.is_dir(),
+               "kb_exists": kb_ok, "reference_onboarding_required": not kb_ok,
                "official_hosts": workspace.official_hosts(data)}
     _emit(
         payload,
@@ -280,6 +284,7 @@ def cmd_open(args: argparse.Namespace) -> int:
         evidence_boundary=args.evidence_boundary,
         brand=args.brand,
         started_via=args.started_via,
+        one_off=args.one_off,
     )
     lines = [f"运行：{meta['run_id']}",
              f"运行目录：{run_record.run_dir_for(meta['run_id'], args.project)}"]
@@ -688,6 +693,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="老师本次显式提供的附件，可重复。登记路径与内容哈希；"
                         "登记过的附件不受绑定根限制，未登记就读会被审计判为越界。"
                         "未绑定知识库时，附件就是本次唯一的证据来源")
+    p.add_argument("--one-off", action="store_true",
+                   help="仅用于未绑定项目：老师已明确确认本次只用附件、不建立长期资料源")
     p.add_argument("--evidence-boundary", choices=list(run_record.EVIDENCE_BOUNDARIES),
                    help="attachments=以附件为准，先只用附件成稿；kb=允许在绑定库内自主检索。"
                         "不给时：有附件默认 attachments，无附件默认 kb")

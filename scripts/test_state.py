@@ -791,6 +791,21 @@ def test_kb_onboarding(tmp: Path) -> None:
     expect_raises("路径是文件时拒绝", workspace.WorkspaceError,
                   workspace.bind, "某品牌", afile, create=True, start=tmp / "onboard2")
 
+    moved = tmp / "被移动的品牌知识库"
+    target.rename(moved)
+    err = expect_raises("绑定路径失效时拒绝开启运行", workspace.WorkspaceError,
+                        run_record.open_run, "生成", start=project, brand="全新品牌")
+    check("路径失效错误要求重新绑定", "重新绑定" in str(err), str(err))
+    import subprocess as _sp_onboarding
+    status = _sp_onboarding.run(
+        [sys.executable, str(Path(__file__).resolve().parent / "blueink.py"),
+         "--project", str(project), "--json", "status"],
+        capture_output=True, text=True,
+    )
+    payload = json.loads(status.stdout)
+    check("路径失效重新触发资料源询问", payload.get("kb_exists") is False
+          and payload.get("reference_onboarding_required") is True, str(payload))
+
 
 def test_brand_mismatch(tmp: Path) -> None:
     """本次要写的品牌与绑定的知识库不是一个：必须在取证之前拦住。
@@ -861,8 +876,8 @@ def test_brand_mismatch(tmp: Path) -> None:
 def test_attachment_only_run(tmp: Path) -> None:
     """老师直接给了参考文件路径：本次不需要品牌知识库。
 
-    "参考这两个文件写一篇"是完全正常的请求。为它强制先做一次绑定，等于为一个
-    五分钟的任务索要一次知识工程。但这一次没有品牌库参与，必须一眼可见。
+    首次不能因为附件静默跳过长期资料源询问；老师明确说"本次只用附件"后，仍可
+    走一次性快线。这一次没有品牌库参与，必须一眼可见。
     """
     project = tmp / "attach_only"
     project.mkdir()
@@ -877,6 +892,9 @@ def test_attachment_only_run(tmp: Path) -> None:
     status_payload = json.loads(status.stdout)
     check("未绑定 status 是正常状态", status.returncode == 0 and status_payload["bound"] is False,
           f"rc={status.returncode} out={status.stdout[:120]} err={status.stderr[-120:]}")
+    check("未绑定状态要求首次资料源询问",
+          status_payload.get("reference_onboarding_required") is True
+          and "共同根目录" in str(status_payload.get("question")), str(status_payload))
 
     ref = tmp / "refs"
     ref.mkdir()
@@ -885,11 +903,16 @@ def test_attachment_only_run(tmp: Path) -> None:
 
     err = expect_raises("未绑定且无附件时拒绝", workspace.WorkspaceError,
                         run_record.open_run, "生成", start=project)
-    check("拒绝时给了两条出路", "1." in str(err) and "2." in str(err), str(err))
+    check("无附件拒绝时要求历史稿件根目录", "共同根目录" in str(err), str(err))
+
+    err = expect_raises("未绑定带附件仍先问资料源", workspace.WorkspaceError,
+                        run_record.open_run, "生成", start=project, brand="某新品牌",
+                        attachments=[str(one)])
+    check("附件不能静默绕过首次询问", "本次只用附件" in str(err), str(err))
 
     meta = run_record.open_run("生成", start=project, brand="某新品牌",
-                               attachments=[str(one)])
-    check("未绑定但有附件可以开启", meta["run_id"])
+                               attachments=[str(one)], one_off=True)
+    check("老师确认 one-off 后可以开启", meta["run_id"])
     check("证据边界强制为附件", meta["evidence_boundary"] == "attachments",
           str(meta["evidence_boundary"]))
     check("记下了本次品牌", meta["brand"] == "某新品牌", str(meta["brand"]))
@@ -899,7 +922,17 @@ def test_attachment_only_run(tmp: Path) -> None:
     # 未绑定时声明 kb 边界是一句假话：没有 kb_root，下游会以为有库可查。
     expect_raises("未绑定时不许声明 kb 边界", workspace.WorkspaceError,
                   run_record.open_run, "生成", start=project,
-                  attachments=[str(one)], evidence_boundary="kb")
+                  attachments=[str(one)], evidence_boundary="kb", one_off=True)
+    expect_raises("one-off 不能脱离附件使用", workspace.WorkspaceError,
+                  run_record.open_run, "生成", start=project, one_off=True)
+
+    parser = blueink_cli.build_parser()
+    subcommands = next(action for action in parser._actions
+                       if "open" in (getattr(action, "choices", None) or {}))
+    open_flags = {
+        option for action in subcommands.choices["open"]._actions for option in action.option_strings
+    }
+    check("open 暴露显式 one-off 出口", "--one-off" in open_flags, str(sorted(open_flags)))
 
     # 当前快线：未绑定运行里，只有登记过的附件算合法来源，其余在写核验时拒绝。
     run_dir = run_record.run_dir_for(meta["run_id"], project)
@@ -935,6 +968,11 @@ def test_attachment_delivery_first(tmp: Path) -> None:
     project = tmp / "delivery_first"
     project.mkdir()
     (project / ".blueink").mkdir()
+    kb = tmp / "delivery-first-kb"
+    style = kb / "05-成品参考" / "历史终稿.md"
+    style.parent.mkdir(parents=True)
+    style.write_text("# 历史终稿\n\n克制、直接地交代经营结果。", encoding="utf-8")
+    workspace.bind("品牌甲", kb, start=project)
     source = tmp / "delivery-first-source.md"
     source.write_text(
         "2026年一季度交付10万辆，位居细分市场第一。", encoding="utf-8"
@@ -964,9 +1002,32 @@ def test_attachment_delivery_first(tmp: Path) -> None:
             "selected": "A",
             "confirmed_by_user": True,
         },
+        "style_refs": [{
+            "path": "05-成品参考/历史终稿.md",
+            "why": "同品牌同品类已确认终稿",
+            "caveat": "只参考表达节奏，不沿用其中事实",
+        }],
     }
+    outside_style = tmp / "其他品牌" / "终稿.md"
+    outside_style.parent.mkdir()
+    outside_style.write_text("其他品牌稿件", encoding="utf-8")
+    invalid = dict(decision)
+    invalid["style_refs"] = [{"path": str(outside_style), "why": "错误引用"}]
+    expect_raises("风格参考不能越过单品牌根", ValueError, run_record.save_decision,
+                  meta["run_id"], invalid, start=project)
     saved = run_record.save_decision(meta["run_id"], decision, start=project)
-    check("附件快线只保存轻量方向", saved["decision"] == {"path": "attachment-delivery-first"})
+    check("附件快线保存轻量方向与风格参考", (
+        saved["decision"].get("path") == "attachment-delivery-first"
+        and saved["decision"]["style_refs"][0]["path"] == "05-成品参考/历史终稿.md"
+    ), str(saved["decision"]))
+    run_path = run_record.run_dir_for(meta["run_id"], project) / "run.json"
+    valid_run = json.loads(run_path.read_text(encoding="utf-8"))
+    tampered = json.loads(json.dumps(valid_run, ensure_ascii=False))
+    tampered["decision"]["style_refs"][0]["path"] = str(outside_style)
+    run_path.write_text(json.dumps(tampered, ensure_ascii=False), encoding="utf-8")
+    a2 = next(c for c in audit_mod.audit(str(run_path.parent))["checks"] if c["id"] == "A2")
+    check("手改运行记录也不能让风格参考越过品牌根", a2["status"] == "fail", str(a2))
+    run_path.write_text(json.dumps(valid_run, ensure_ascii=False), encoding="utf-8")
     check("附件快线不在正文前造事实原子", saved["facts"] == [])
 
     run_dir = run_record.run_dir_for(meta["run_id"], project)
@@ -1028,6 +1089,8 @@ def test_attachment_delivery_first(tmp: Path) -> None:
         and delivery_check.is_file()
         and "交付核对卡" not in delivery_path.read_text(encoding="utf-8")
         and "交付核对卡" in delivery_check.read_text(encoding="utf-8")
+        and "## 风格参考" in delivery_check.read_text(encoding="utf-8")
+        and "历史终稿.md" in delivery_check.read_text(encoding="utf-8")
         and "经营韧性" in closed.stdout
     ), f"rc={closed.returncode} out={closed.stdout[-200:]} err={closed.stderr[-160:]}")
     check("正文快线通过五项审计", audit_mod.audit(str(run_dir))["verdict"] == "pass")

@@ -818,6 +818,13 @@ def _fast_check_isolation(record: Any, verify: Any) -> Check:
         source = str(fact.get("source_path") or "")
         if not source or not _fast_source_allowed(source, record):
             check.fail(f"事实来源未登记或越过绑定知识库：{source}", f"run.json:facts[{index}]")
+    decision = record.get("decision")
+    if isinstance(decision, dict):
+        for index, item in enumerate(decision.get("style_refs") or []):
+            ref = str((item or {}).get("path") or "") if isinstance(item, dict) else ""
+            if not ref or not _fast_source_allowed(ref, record):
+                check.fail(f"风格参考未登记或越过绑定知识库：{ref}",
+                           f"run.json:decision.style_refs[{index}]")
     if isinstance(verify, dict):
         for index, item in enumerate(verify.get("sources_used") or []):
             ref = str((item or {}).get("path_or_url") or "") if isinstance(item, dict) else ""

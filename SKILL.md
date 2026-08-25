@@ -10,7 +10,7 @@ disallowed-tools: Skill, Agent, Task
 compatibility: Claude Code only. Supports macOS and Windows with Python 3.9 or newer.
 metadata:
   author: 新蓝标数字 · 汽车事业群 · AI 内容中台
-  version: 4.2.0
+  version: 4.2.1
   created: 2026-08-22
   last_reviewed: 2026-08-25
   review_interval_days: 90
@@ -36,7 +36,7 @@ metadata:
 
 模型和 effort 由用户在当前 Claude Code 会话中自行选择；BlueInk 不指定、不切换。系统只记录实际阶段耗时，不设置硬时限、自动超时或质量降级。
 
-## 第一步：登记本次证据
+## 第一步：确认长期资料源
 
 Claude Code 加载 Skill 时会显示 `Base directory for this skill`。把这个现成目录记为技能根；插件环境里优先使用 `${CLAUDE_PLUGIN_ROOT}`。不要再用 `find`、`ls` 或 `status` 定位技能，也不要预先检查 Python 版本；只有命令实际失败时才进入排障。
 
@@ -46,34 +46,60 @@ Claude Code 加载 Skill 时会显示 `Base directory for this skill`。把这�
 <Python 3.9+> "${CLAUDE_PLUGIN_ROOT}/scripts/blueink.py" --project "${CLAUDE_PROJECT_DIR}"
 ```
 
-### 老师给了明确附件
+每次显式启动先读取当前业务项目的绑定状态；这一步只判断项目是否已经有长期资料源，不展开索引或检索：
 
-有附件时不要先跑 `status`、`bind`、`check-brand` 或 `index`，直接登记：
+```bash
+$BLUEINK status --json
+```
+
+### 当前项目未绑定
+
+先只问老师一个问题：
+
+> 这个品牌所有过往稿件所在的共同根目录绝对路径是什么？
+
+拿到路径后绑定并建立索引。一个工作空间只接受一个不包含其他品牌的共同根目录：
+
+```bash
+$BLUEINK bind --brand "<品牌>" --kb "<共同根目录绝对路径>"
+$BLUEINK index
+```
+
+资料源确认发生在运行开启前，不计入普通生成的一到两轮访谈。若本次品牌也无法从需求中明确，先单独问品牌，再问根目录，不把两个问题塞进同一轮。
+
+只有老师明确回复“本次只用附件”时，才允许一次性绕过长期资料源；没有附件时不能绕过：
+
+```bash
+$BLUEINK open --mode 生成 --brand "<品牌>" --one-off --attach "<绝对路径>" [--attach "<绝对路径>"]
+```
+
+`open` 会机械拒绝未绑定、未获得 one-off 确认的附件任务，避免主智能体静默跳过首次询问。
+
+### 当前项目已绑定
+
+如果 `status` 返回 `kb_exists: false`，说明原路径已经移动、改名或换机：停止开启运行，重新询问共同根目录，用 `bind --force` 更新后立即重建索引。
+
+路径有效时再核对本次品牌；不匹配立即停止，把“品牌写错、换项目、只用指定附件”三条出路交给老师，不自行选边：
+
+```bash
+$BLUEINK check-brand --brand "<本次品牌>"
+```
+
+## 第二步：登记本次证据
+
+老师给了明确附件时直接登记；附件默认是本次封闭事实边界：
 
 ```bash
 $BLUEINK open --mode 生成 --brand "<品牌>" --attach "<绝对路径>" [--attach "<绝对路径>"]
 ```
 
-附件默认是本次封闭事实边界。只有高影响缺口、冲突或时效问题阻止成稿时才最小扩展；不要为“可能有用”展开整库检索。
-
-### 没有附件
-
-先读取工作空间状态。未绑定时只问知识库位置这一件事，再绑定和索引：
+没有附件时直接开启绑定库任务：
 
 ```bash
-$BLUEINK status
-$BLUEINK bind --brand "<品牌>" --kb "<知识库绝对路径>" [--create]
-$BLUEINK index
-```
-
-已绑定时确认本次品牌并核对：
-
-```bash
-$BLUEINK check-brand --brand "<本次品牌>"
 $BLUEINK open --mode 生成 --brand "<本次品牌>"
 ```
 
-品牌不匹配立即停止，把“品牌写错、换项目、只用指定附件”三条出路交给老师，不自行选边。
+只有高影响缺口、冲突或时效问题阻止成稿时才最小扩展事实来源；不要为“可能有用”展开整库事实检索。历史终稿的风格参考按默认生成指导中的 `style` 轨处理，不改变附件事实边界。
 
 ## 默认生成
 
@@ -155,5 +181,5 @@ $BLUEINK close --run "<run_id>"
 ## Gotchas
 
 - Claude Code 直接加载 Skill 时 `${CLAUDE_PLUGIN_ROOT}` 可能为空，但加载结果已经给出技能 `Base directory`；使用它，不要重新搜索安装目录。
-- 已给明确附件时 `status` 会把正常任务带回知识库绑定分支；直接 `open --attach`。
+- 未绑定项目即使带了附件也必须先完成一次资料源询问；只有老师明确说“本次只用附件”才加 `--one-off`。
 - `handoff` 是正文所有权切换点。之后核验只写 `verify.json`，`close` 只生成 `delivery-check.md`，都不再修改 `delivery.md`。
