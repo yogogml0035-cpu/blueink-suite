@@ -629,11 +629,11 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     (
         "audit-incomplete",
         "scripts/audit.py",
-        'verdict = "incomplete"',
-        'verdict = "pass"',
+        'verdict = "violated" if failed else ("incomplete" if missing else "pass")',
+        'verdict = "violated" if failed else "pass"',
         ["scripts/run_evals.py --rollout --include-holdout"],
-        "审计器把「运行没跑完」判成「流程通过」：中断的运行会拿到一张通行证，"
-        "而这正是保留测试 case-5 存在的理由",
+        "审计器把 Schema 5「运行没跑完」判成「流程通过」：中断的运行会拿到一张通行证，"
+        "而这正是 schema5-incomplete holdout 存在的理由",
     ),
     (
         "sufficiency-dimensions",

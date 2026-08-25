@@ -1,0 +1,15 @@
+{
+  "run_id": "20260825-100007-output",
+  "brand": "品牌甲",
+  "mode": "生成",
+  "verdict": "violated",
+  "checks": [
+    {"id": "A1", "name": "入口唯一", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A2", "name": "单品牌隔离", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A3", "name": "动态访谈", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A4", "name": "阶段边界", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A5", "name": "输出有效", "status": "fail", "detail": "核验结论应为「可进入人工初审」", "evidence": ["verify.json:verdict"]}
+  ],
+  "failed": ["A5"],
+  "missing_artifacts": []
+}
