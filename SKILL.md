@@ -10,7 +10,7 @@ disallowed-tools: Skill, Agent, Task
 compatibility: Claude Code only. Supports macOS and Windows with Python 3.9 or newer.
 metadata:
   author: 新蓝标数字 · 汽车事业群 · AI 内容中台
-  version: 4.2.1
+  version: 4.2.2
   created: 2026-08-22
   last_reviewed: 2026-08-25
   review_interval_days: 90

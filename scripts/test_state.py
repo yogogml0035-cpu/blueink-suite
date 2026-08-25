@@ -228,6 +228,9 @@ def test_index_and_retrieve(project: Path) -> None:
     result = index_kb.build(start=project)
     stats = result["stats"]
     check("索引扫到了文件", stats["total"] >= 8, str(stats))
+    check("顶层字段明确表示指令产物根目录",
+          "instruction_artifact_roots" in result and "skill_roots" not in result,
+          str(sorted(result)))
 
     by_path = {rec["path"]: rec for rec in result["files"]}
 
@@ -299,6 +302,31 @@ def test_index_and_retrieve(project: Path) -> None:
                                  include_instruction_artifacts=True, start=project)
     check("显式审计这些技能包时能取回",
           tpl in [h["path"] for h in opened["hits"]], str([h["path"] for h in opened["hits"]]))
+
+    # 普通目录在首次索引后才新增 SKILL.md 时，未改内容的旧模板也必须
+    # 立即重新分类；不能因为文件哈希未变就沿用旧的 instruction_artifact=false。
+    late_root = kb_of(project) / "04-经验总结原稿" / "late-pr-writer"
+    late_template = late_root / "references" / "template.md"
+    late_template.parent.mkdir(parents=True)
+    late_template.write_text("# 动态隔离令牌\n新闻稿必须使用固定三段式。\n", encoding="utf-8")
+    plain = index_kb.build(start=project)
+    late_rel = late_template.relative_to(kb_of(project)).as_posix()
+    check("新增的普通模板最初不被误伤",
+          not {rec["path"]: rec for rec in plain["files"]}[late_rel]["instruction_artifact"])
+
+    (late_root / "SKILL.md").write_text("# 后加入的历史技能包\n", encoding="utf-8")
+    promoted = index_kb.build(start=project)
+    promoted_by_path = {rec["path"]: rec for rec in promoted["files"]}
+    check("新增 SKILL.md 后旧模板被重新分类",
+          promoted_by_path[late_rel]["instruction_artifact"], str(promoted["stats"]))
+    blocked = retrieve_mod.search("动态隔离令牌", limit=10, start=project)
+    check("后加入技能包的旧模板默认不参与检索",
+          late_rel not in [h["path"] for h in blocked["hits"]], str(blocked["hits"]))
+
+    (late_root / "SKILL.md").unlink()
+    demoted = index_kb.build(start=project)
+    check("移除 SKILL.md 后旧模板恢复为普通语料",
+          not {rec["path"]: rec for rec in demoted["files"]}[late_rel]["instruction_artifact"])
 
     # 风格轨不要初稿
     style = retrieve_mod.search("上市", track="style", limit=10, start=project)

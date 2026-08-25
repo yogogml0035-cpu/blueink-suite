@@ -591,9 +591,9 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     (
         "index-hash",
         "scripts/index_kb.py",
-        'if old.get("hash") == content_hash(path):',
-        'if old.get("size") == path.stat().st_size and old.get("mtime") == '
-        'datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds"):',
+        'old.get("hash") == content_hash(path)',
+        'old.get("size") == path.stat().st_size and old.get("mtime") == '
+        'datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")',
         ["scripts/test_state.py"],
         "增量索引改用 size+mtime 判断复用：同长度改写并恢复修改时间后静默漏更新，"
         "检索永远拿不到新内容且不报错",

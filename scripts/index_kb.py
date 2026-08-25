@@ -29,7 +29,7 @@ from xml.etree import ElementTree
 
 import workspace
 
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 SUMMARY_CHARS = 200
 MAX_HASH_BYTES = 16 * 1024 * 1024  # 超出部分不参与哈希，避免为大附件反复全量读盘
 SKIP_DIRS = {".git", ".svn", "__pycache__", "node_modules", ".blueink", ".obsidian"}
@@ -176,7 +176,7 @@ def read_body(path: Path) -> tuple[str, str]:
     return "", "unsupported"
 
 
-def skill_roots(root: Path) -> list[Path]:
+def instruction_artifact_roots(root: Path) -> list[Path]:
     """知识库里所有历史技能包的根目录（相对 ``root``）。
 
     判定标志是目录里有 ``SKILL.md`` / ``AGENTS.md`` / ``CLAUDE.md``。按目录判定
@@ -412,7 +412,7 @@ def build(full: bool = False, limit: int | None = None, start=None) -> dict[str,
     ws = workspace.load(start)
     root = workspace.kb_root(start)
     layout = ws.get("corpus_layout") or {}
-    roots = skill_roots(root)
+    roots = instruction_artifact_roots(root)
 
     previous = {} if full else {rec["path"]: rec for rec in load_index(start).get("files", [])}
     records: list[dict[str, Any]] = []
@@ -426,9 +426,11 @@ def build(full: bool = False, limit: int | None = None, start=None) -> dict[str,
             break
         rel = path.relative_to(root).as_posix()
         old = previous.get(rel)
+        instruction = _is_instruction_artifact(rel, roots)
         if old is not None:
             try:
-                if old.get("hash") == content_hash(path):
+                if (old.get("hash") == content_hash(path)
+                        and bool(old.get("instruction_artifact")) == instruction):
                     records.append(old)
                     reused += 1
                     continue
@@ -452,7 +454,7 @@ def build(full: bool = False, limit: int | None = None, start=None) -> dict[str,
         "kb_root": str(root),
         "built_at": _now(),
         "preview": bool(limit),
-        "skill_roots": [p.as_posix() for p in roots],
+        "instruction_artifact_roots": [p.as_posix() for p in roots],
         "skipped": skipped,
         "files": records,
         "stats": {

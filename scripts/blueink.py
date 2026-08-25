@@ -190,7 +190,7 @@ def cmd_index(args: argparse.Namespace) -> int:
     if stats["instruction_artifacts"]:
         lines.append(
             f"⚠ 隔离历史技能产物 {stats['instruction_artifacts']} 个"
-            f"（来自 {'、'.join(result.get('skill_roots') or []) or '知识库根'}）："
+            f"（来自 {'、'.join(result.get('instruction_artifact_roots') or []) or '知识库根'}）："
             f"默认不参与检索，避免外部提示词与固定模板接管本次判断。"
         )
     if stats["skipped"]:
