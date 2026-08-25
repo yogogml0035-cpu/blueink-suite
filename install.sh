@@ -3,7 +3,8 @@
 #
 # 推荐优先使用 README 里的 Claude Code marketplace 安装。这个脚本只作为本地源码
 # 直装入口：把运行插件放到 ~/.claude/skills/blueink-suite。运行时只有一个 Skill，
-# 默认生成只读取 references/generate.md，不注册全局或插件子智能体。
+# 默认生成读取 policies/common-policy.yaml 与 references/generate.md，
+# 不注册全局或插件子智能体。
 
 set -eu
 
@@ -32,7 +33,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 2
 fi
 
-for required in SKILL.md .claude-plugin/plugin.json references/generate.md \
+for required in SKILL.md .claude-plugin/plugin.json policies/common-policy.yaml references/generate.md \
     references/research.md references/feedback.md references/troubleshooting.md scripts; do
     if [ ! -e "${SRC}/${required}" ]; then
         echo "源目录不完整，缺 ${required}：${SRC}" >&2
@@ -79,6 +80,7 @@ rm -rf "${STAGE}/${SKILL_NAME}/.git" \
        "${STAGE}/${SKILL_NAME}/evals" \
        "${STAGE}/${SKILL_NAME}/commands"
 rm -f "${STAGE}/${SKILL_NAME}/.gitignore" \
+      "${STAGE}/${SKILL_NAME}/.DS_Store" \
       "${STAGE}/${SKILL_NAME}/DECISIONS.md" \
       "${STAGE}/${SKILL_NAME}/DESIGN_NOTES.md" \
       "${STAGE}/${SKILL_NAME}/EVOLUTION.md"
@@ -89,5 +91,5 @@ fi
 mv "${STAGE}/${SKILL_NAME}" "${TARGET}"
 
 echo "✓ 已安装 Claude Code 插件：${TARGET}"
-echo "  单智能体运行；默认生成只读取 references/generate.md。"
+echo "  单智能体运行；默认读取通用规范与 references/generate.md。"
 echo "  新开 Claude Code 会话后输入：/blueink-suite <你的需求>"

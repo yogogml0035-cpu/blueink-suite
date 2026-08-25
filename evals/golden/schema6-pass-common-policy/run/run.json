@@ -1,0 +1,76 @@
+{
+  "schema_version": 6,
+  "run_id": "20260825-100009-policy-pass",
+  "started_via": "/blueink-suite",
+  "started_at": "2026-08-25T10:00:00",
+  "mode": "生成",
+  "brand": "品牌甲",
+  "brand_key": "brand-a",
+  "brand_asked": "品牌甲",
+  "kb_root": "",
+  "bound": false,
+  "task_attachments": [
+    {
+      "path": "/fixtures/brand-a/brief.md",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "bytes": 42,
+      "brand": "品牌甲",
+      "source": "user"
+    }
+  ],
+  "evidence_boundary": "attachments",
+  "policy_version": "1.0.0",
+  "policy_check": {
+    "policy_version": "1.0.0",
+    "delivery_sha256": "e67aef4583a3d0454c68841b7a72df2ac269fd1a6a713ccc67cfc8b79b1d9aeb",
+    "checked_rules": [
+      "G-EVID-001",
+      "G-CLAIM-001",
+      "G-COMP-001",
+      "G-ATTR-001",
+      "G-STATE-001",
+      "G-QUOTE-001",
+      "G-COMPLY-001"
+    ],
+    "hits": [],
+    "status": "pass",
+    "checked_at": "2026-08-25T10:00:02"
+  },
+  "interview": {
+    "rounds": [
+      {
+        "n": 1,
+        "kind": "direction",
+        "question": "按联合活动的对等事实主线写，可以吗？",
+        "answer": "可以",
+        "changed": "确认对等呈现合作双方"
+      }
+    ],
+    "stopped_because": "传播主线与表达边界已确认"
+  },
+  "direction": {
+    "options": [
+      {
+        "id": "A",
+        "name": "对等事实",
+        "claim": "双方共同完成活动",
+        "suitable_for": "活动通稿",
+        "cost": "不做产品优劣判断"
+      }
+    ],
+    "selected": "A",
+    "confirmed_by_user": true
+  },
+  "facts": [],
+  "decision": {"path": "attachment-delivery-first"},
+  "metrics": {
+    "delivery_sha256": "e67aef4583a3d0454c68841b7a72df2ac269fd1a6a713ccc67cfc8b79b1d9aeb",
+    "policy_checked_at": "2026-08-25T10:00:02",
+    "delivery_handoff_at": "2026-08-25T10:00:03",
+    "delivery_check_saved_at": "2026-08-25T10:00:04"
+  },
+  "stage": 9,
+  "stage_name": "运行归档",
+  "closed_at": "2026-08-25T10:00:05",
+  "artifacts": ["delivery-check.md", "delivery.md", "run.json", "verify.json"]
+}

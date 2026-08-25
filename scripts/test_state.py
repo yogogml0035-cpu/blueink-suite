@@ -553,8 +553,8 @@ def test_audit_localises(tmp: Path) -> None:
     check("A2 指名了那个文件", "凭空写出的引用" in a2["detail"], str(a2["detail"]))
     check("每条违约都有 evidence", all(c["evidence"] for c in verdict["checks"]
                                      if c["status"] == "fail"))
-    check("五项契约一条不少", [c["id"] for c in verdict["checks"]] ==
-          ["A1", "A2", "A3", "A4", "A5"], str([c["id"] for c in verdict["checks"]]))
+    check("六项契约一条不少", [c["id"] for c in verdict["checks"]] ==
+          ["A1", "A2", "A3", "A4", "A5", "A6"], str([c["id"] for c in verdict["checks"]]))
     check("结论与明细自洽", verdict["failed"] == [c["id"] for c in verdict["checks"]
                                               if c["status"] == "fail"])
 
@@ -980,6 +980,7 @@ def test_attachment_only_run(tmp: Path) -> None:
         },
     }, start=project)
     (run_dir / "delivery.md").write_text("正文", encoding="utf-8")
+    run_record.save_policy_check(meta["run_id"], {"hits": []}, start=project)
     run_record.handoff_delivery(meta["run_id"], start=project)
     err = expect_raises(
         "附件模式下越界照样抓得到", ValueError, run_record.save_verify,
@@ -1062,6 +1063,43 @@ def test_attachment_delivery_first(tmp: Path) -> None:
     delivery_path = run_dir / "delivery.md"
     delivery_text = "# 稿件\n\n2026年一季度交付10万辆，位居细分市场第一。这说明经营韧性得到验证。\n"
     delivery_path.write_text(delivery_text, encoding="utf-8")
+    expect_raises(
+        "handoff 前必须有通用规范检查", ValueError,
+        run_record.handoff_delivery, meta["run_id"], start=project,
+    )
+    rule_ids = list(run_record.common_policy_rule_ids())
+    blocked = run_record.save_policy_check(meta["run_id"], {
+        "checked_rules": rule_ids,
+        "hits": [{
+            "rule_id": "G-CLAIM-001",
+            "quote": "位居细分市场第一",
+            "reason": "比较范围与来源授权需要确认",
+            "action": "补齐比较范围和来源",
+        }],
+    }, start=project)
+    check("通用规范命中项会判 blocked", blocked["status"] == "blocked", str(blocked))
+    expect_raises(
+        "通用规范命中时拒绝 handoff", ValueError,
+        run_record.handoff_delivery, meta["run_id"], start=project,
+    )
+    passed = run_record.save_policy_check(meta["run_id"], {
+        "checked_rules": rule_ids,
+        "hits": [],
+    }, start=project)
+    check("通用规范通过回执绑定正文哈希", (
+        passed["status"] == "pass"
+        and passed["delivery_sha256"] == run_record._sha256(delivery_path)
+    ), str(passed))
+    delivery_path.write_text(delivery_text + "检查后变化。\n", encoding="utf-8")
+    expect_raises(
+        "通用规范回执不能套到变化后的正文", ValueError,
+        run_record.handoff_delivery, meta["run_id"], start=project,
+    )
+    delivery_path.write_text(delivery_text, encoding="utf-8")
+    run_record.save_policy_check(meta["run_id"], {
+        "checked_rules": rule_ids,
+        "hits": [],
+    }, start=project)
     handed = run_record.handoff_delivery(meta["run_id"], start=project)
     check("handoff 返回完整可修改稿件", "经营韧性" in handed["delivery"])
     check("handoff 记录方向到稿件耗时", handed["metrics"].get("direction_to_delivery_seconds") is not None)
@@ -1076,6 +1114,11 @@ def test_attachment_delivery_first(tmp: Path) -> None:
     )
     check("handoff 命令会立即展示完整稿件", cli.returncode == 0 and "经营韧性" in cli.stdout,
           f"rc={cli.returncode} out={cli.stdout[-160:]} err={cli.stderr[-160:]}")
+    expect_raises(
+        "handoff 后不能重写通用规范回执", ValueError,
+        run_record.save_policy_check, meta["run_id"],
+        {"checked_rules": rule_ids, "hits": []}, start=project,
+    )
 
     before = delivery_path.read_bytes()
     verify = run_record.save_verify(
@@ -1086,6 +1129,22 @@ def test_attachment_delivery_first(tmp: Path) -> None:
     check("轻量核验不要求手抄 matched claims", verify["review_mode"] == "issues-only-after-handoff")
     check("轻量核验复用已登记附件", verify["sources_used"][0]["path_or_url"] == str(source.resolve()))
     check("核验没有覆盖老师稿件", delivery_path.read_bytes() == before)
+    expect_raises(
+        "红线命中不能再用无编号字符串", ValueError,
+        run_record.save_verify, meta["run_id"],
+        {"issues": [], "redline_hits": ["竞品拉踩"]}, start=project,
+    )
+    redline = run_record.save_verify(
+        meta["run_id"],
+        {"issues": [], "redline_hits": [{
+            "rule_id": "G-CLAIM-001",
+            "quote": "位居细分市场第一",
+            "reason": "强主张的比较范围待确认",
+            "action": "补齐比较范围和来源",
+        }]},
+        start=project,
+    )
+    check("结构化红线命中会阻止提交", redline["verdict"] == "暂不建议提交", str(redline))
     verify = run_record.save_verify(
         meta["run_id"],
         {"issues": [{
@@ -1121,7 +1180,7 @@ def test_attachment_delivery_first(tmp: Path) -> None:
         and "历史终稿.md" in delivery_check.read_text(encoding="utf-8")
         and "经营韧性" in closed.stdout
     ), f"rc={closed.returncode} out={closed.stdout[-200:]} err={closed.stderr[-160:]}")
-    check("正文快线通过五项审计", audit_mod.audit(str(run_dir))["verdict"] == "pass")
+    check("正文快线通过六项审计", audit_mod.audit(str(run_dir))["verdict"] == "pass")
 
     delivery_path.write_text(delivery_text + "老师新增一句。\n", encoding="utf-8")
     err = expect_raises(

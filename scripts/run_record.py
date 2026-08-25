@@ -23,12 +23,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import miniyaml
 import workspace
 
 ENTRY = "/blueink-suite"
 ENTRY_ALIASES = (ENTRY, "/blueink-suite:blueink-suite")
 MODES = ("生成", "绑定", "学习", "定位")
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
+POLICY_PATH = Path(__file__).resolve().parent.parent / "policies" / "common-policy.yaml"
 
 # 本次证据边界。``attachments`` 表示老师说了"以附件为准"，先只用附件成稿；
 # ``kb`` 是默认，允许在绑定库内自主检索。它是一条**声明**而不是一道锁——
@@ -43,7 +45,7 @@ KEEP_RUNS = 20
 RUN_META_FIELDS = (
     "schema_version", "run_id", "started_via", "started_at", "mode", "brand", "brand_key",
     "brand_asked", "kb_root", "bound", "task_attachments", "evidence_boundary",
-    "interview", "direction", "facts", "decision", "metrics",
+    "policy_version", "policy_check", "interview", "direction", "facts", "decision", "metrics",
     "stage", "stage_name", "closed_at", "artifacts",
 )
 
@@ -77,12 +79,15 @@ SCHEMA_4_STAGE_ARTIFACTS = {
     10: ["feedback.json"],
 }
 
+SCHEMA_5_STAGE_ARTIFACTS = STAGE_ARTIFACTS
+
 STRONG_WORDS = ("唯一", "全部", "普遍", "均", "最高")
 VERDICTS = ("可进入人工初审", "有待确认项", "暂不建议提交")
 JUDGEMENTS = ("matched", "drifted", "unsourced", "stale")
 
 RISK_COMPARISONS = STRONG_WORDS + (
     "第一", "领先", "最大", "最低", "最健康", "远高于", "远低于",
+    "首个", "首款", "顶级", "标杆", "碾压", "吊打", "完胜", "超越同级",
 )
 RISK_RELATIONS = ("同比", "环比", "超过", "不足", "增长", "下降", "倍")
 RISK_CAUSAL = ("因此", "证明", "说明", "导致", "意味着", "得益于")
@@ -120,6 +125,57 @@ def _sha256(path: Path, chunk: int = 1 << 20) -> str:
                 break
             h.update(block)
     return h.hexdigest()
+
+
+def common_policy() -> dict[str, Any]:
+    """读取并校验全品牌通用规范。
+
+    Returns:
+        含版本、硬规则和中文表达默认值的映射。
+
+    Raises:
+        ValueError: 文件不可读、YAML 不合法或必需字段缺失。
+    """
+    try:
+        data = miniyaml.load_file(POLICY_PATH)
+    except (OSError, miniyaml.YamlError) as exc:
+        raise ValueError(f"通用规范无法读取：{POLICY_PATH}（{exc}）") from exc
+    if not isinstance(data, dict):
+        raise ValueError("通用规范顶层必须是对象")
+    for field in ("version", "owner", "last_reviewed", "scope"):
+        if not str(data.get(field) or "").strip():
+            raise ValueError(f"通用规范缺 {field}")
+    all_ids: set[str] = set()
+    for group, fields in (
+        ("hard_rules", ("id", "name", "rule", "allow", "on_hit")),
+        ("expression_defaults", ("id", "name", "rule")),
+    ):
+        items = data.get(group)
+        if not isinstance(items, list) or not items:
+            raise ValueError(f"通用规范的 {group} 必须是非空数组")
+        ids: set[str] = set()
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(f"通用规范 {group}[{index}] 必须是对象")
+            for field in fields:
+                if not str(item.get(field) or "").strip():
+                    raise ValueError(f"通用规范 {group}[{index}] 缺 {field}")
+            rid = str(item["id"])
+            if rid in ids or rid in all_ids:
+                raise ValueError(f"通用规范 {group} 出现重复 id：{rid}")
+            ids.add(rid)
+            all_ids.add(rid)
+    return data
+
+
+def common_policy_version() -> str:
+    """返回当前通用规范版本；规范无效时抛出 ``ValueError``。"""
+    return str(common_policy()["version"])
+
+
+def common_policy_rule_ids() -> tuple[str, ...]:
+    """按规范顺序返回全部不可覆盖的硬规则编号。"""
+    return tuple(str(item["id"]) for item in common_policy()["hard_rules"])
 
 
 def register_attachments(paths: list[str], brand: str = "") -> list[dict[str, Any]]:
@@ -282,6 +338,8 @@ def open_run(
         "bound": bound,
         "task_attachments": task_attachments,
         "evidence_boundary": evidence_boundary,
+        "policy_version": common_policy_version(),
+        "policy_check": None,
         "interview": None,
         "direction": None,
         "facts": [],
@@ -601,6 +659,94 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     return meta
 
 
+def _validate_policy_hits(value: Any, delivery: str, field: str) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} 必须是数组")
+    valid_ids = set(common_policy_rule_ids())
+    hits: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"{field}[{index}] 必须是对象")
+        rule_id = str(item.get("rule_id") or "").strip()
+        quote = str(item.get("quote") or "").strip()
+        action = str(item.get("action") or "").strip()
+        if rule_id not in valid_ids:
+            raise ValueError(f"{field}[{index}].rule_id 不在通用规范中：{rule_id}")
+        if not quote or quote not in delivery:
+            raise ValueError(f"{field}[{index}].quote 无法定位到 delivery.md")
+        if not action:
+            raise ValueError(f"{field}[{index}] 缺 action")
+        hit = {"rule_id": rule_id, "quote": quote, "action": action}
+        reason = str(item.get("reason") or "").strip()
+        if reason:
+            hit["reason"] = reason
+        hits.append(hit)
+    return hits
+
+
+def save_policy_check(run_id: str, payload: Any, start=None) -> dict[str, Any]:
+    """把通用硬规则检查绑定到交付前的正文版本。
+
+    Args:
+        run_id: 已开启且已经保存方向的运行编号。
+        payload: 结构化 ``hits``；可选 ``checked_rules`` 用于显式交叉校验。
+        start: 业务项目根目录；省略时由工作空间自动定位。
+
+    Returns:
+        含规范版本、正文哈希、命中项和状态的检查回执。
+
+    Raises:
+        ValueError: 规则未逐条检查、命中项不合法、规范版本漂移或正文已交付。
+        FileNotFoundError: 尚未写入 ``delivery.md``。
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("policy 输入顶层必须是对象")
+    run_dir = run_dir_for(run_id, start)
+    meta = load_meta(run_id, start)
+    if _meta_path(run_dir).name != "run.json" or meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
+        raise ValueError("旧版运行只读兼容，不能写入通用规范检查")
+    if (meta.get("metrics") or {}).get("delivery_handoff_at"):
+        raise ValueError("delivery.md 已交给老师；此后只允许保存受限核验问题")
+    delivery_path = run_dir / "delivery.md"
+    if not delivery_path.is_file():
+        raise FileNotFoundError(f"缺 {delivery_path}，不能先检查后成稿")
+    delivery = delivery_path.read_text(encoding="utf-8").strip()
+    if not delivery:
+        raise ValueError("delivery.md 为空，不能执行通用规范检查")
+
+    current_version = common_policy_version()
+    if str(meta.get("policy_version") or "") != current_version:
+        raise ValueError(
+            f"运行绑定的通用规范版本是 {meta.get('policy_version')}，当前为 {current_version}；"
+            "请按当前规范重开运行"
+        )
+    expected = common_policy_rule_ids()
+    checked = payload.get("checked_rules")
+    checked_ids = [str(item) for item in checked] if isinstance(checked, list) else []
+    if checked is not None and (
+        not isinstance(checked, list)
+        or len(checked_ids) != len(set(checked_ids))
+        or set(checked_ids) != set(expected)
+    ):
+        raise ValueError(f"checked_rules 必须逐条包含 {expected}")
+    hits = _validate_policy_hits(payload.get("hits"), delivery, "policy.hits")
+    saved = datetime.now()
+    data = {
+        "policy_version": current_version,
+        "delivery_sha256": _sha256(delivery_path),
+        "checked_rules": list(expected),
+        "hits": hits,
+        "status": "blocked" if hits else "pass",
+        "checked_at": saved.isoformat(timespec="seconds"),
+    }
+    meta["policy_check"] = data
+    metrics = dict(meta.get("metrics") or {})
+    metrics["policy_checked_at"] = data["checked_at"]
+    meta["metrics"] = metrics
+    _write_meta(run_dir, meta)
+    return data
+
+
 def handoff_delivery(run_id: str, start=None) -> dict[str, Any]:
     """登记并返回老师可立即修改的唯一正文；登记后当前智能体不得覆盖。"""
     run_dir = run_dir_for(run_id, start)
@@ -627,6 +773,25 @@ def handoff_delivery(run_id: str, start=None) -> dict[str, Any]:
             "可修改稿件交给老师后正文发生了变化；当前智能体不得自动覆盖，"
             "请只提供核验问题和局部替换建议"
         )
+    policy_check = meta.get("policy_check")
+    if not isinstance(policy_check, dict):
+        raise ValueError("交付前必须先保存通用规范检查：save --kind policy")
+    if str(policy_check.get("policy_version") or "") != str(meta.get("policy_version") or ""):
+        raise ValueError("通用规范检查版本与本次运行不一致，请重新检查")
+    current_policy_version = common_policy_version()
+    if str(meta.get("policy_version") or "") != current_policy_version:
+        raise ValueError(
+            f"通用规范已从 {meta.get('policy_version')} 更新为 {current_policy_version}；"
+            "请按当前规范重开运行"
+        )
+    if str(policy_check.get("delivery_sha256") or "") != current_hash:
+        raise ValueError("delivery.md 在通用规范检查后发生变化，请重新执行 save --kind policy")
+    checked_rules = [str(item) for item in (policy_check.get("checked_rules") or [])]
+    if len(checked_rules) != len(set(checked_rules)) \
+            or set(checked_rules) != set(common_policy_rule_ids()):
+        raise ValueError("通用硬规则没有逐条检查完整，请重新执行 save --kind policy")
+    if policy_check.get("status") != "pass" or policy_check.get("hits"):
+        raise ValueError("通用规范仍有命中项，修复正文并重新检查后才能 handoff")
 
     now = datetime.now()
     if not metrics.get("delivery_handoff_at"):
@@ -780,7 +945,9 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
             raise ValueError(f"sources_used[{index}] 未登记或越界：{source}")
 
     cross_brand = payload.get("cross_brand") or []
-    redline_hits = payload.get("redline_hits") or []
+    redline_hits = _validate_policy_hits(
+        payload.get("redline_hits") or [], delivery, "redline_hits"
+    )
     editorial_risks = payload.get("editorial_risks") or []
     if not all(isinstance(value, list) for value in (cross_brand, redline_hits, editorial_risks)):
         raise ValueError("cross_brand、redline_hits、editorial_risks 必须是数组")
@@ -802,6 +969,7 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
         "review_mode": "issues-only-after-handoff" if compact_review else "claim-map",
         "risk_sentences": risks if compact_review else [],
         "delivery_sha256": current_hash,
+        "policy_version": meta.get("policy_version"),
         "cross_brand": cross_brand,
         "redline_hits": redline_hits,
         "editorial_risks": editorial_risks,
@@ -834,9 +1002,11 @@ def save_verify(run_id: str, payload: Any, start=None) -> dict[str, Any]:
 def save_payload(run_id: str, kind: str, payload: Any, start=None) -> dict[str, Any]:
     if kind == "decision":
         return save_decision(run_id, payload, start)
+    if kind == "policy":
+        return save_policy_check(run_id, payload, start)
     if kind == "verify":
         return save_verify(run_id, payload, start)
-    raise ValueError("kind 只能是 decision 或 verify")
+    raise ValueError("kind 只能是 decision、policy 或 verify")
 
 
 def build_delivery_check(run_id: str, start=None) -> Path:
@@ -871,7 +1041,14 @@ def build_delivery_check(run_id: str, start=None) -> Path:
         )
     for label, key in (("跨品牌", "cross_brand"), ("红线", "redline_hits")):
         for item in verify.get(key) or []:
-            issues.append(f"- {label}｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}")
+            if label == "红线" and isinstance(item, dict):
+                issues.append(
+                    f"- 红线｜{item.get('rule_id')}｜{item.get('quote')}｜{item.get('action')}"
+                )
+            else:
+                issues.append(
+                    f"- {label}｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}"
+                )
     for item in verify.get("editorial_risks") or []:
         issues.append(
             f"- 编辑风险｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}"
@@ -1001,7 +1178,11 @@ def reached_stage(run_dir: Path) -> int:
             schema_version = record.get("schema_version") if isinstance(record, dict) else None
         except (json.JSONDecodeError, OSError, TypeError, ValueError):
             reached = 0
-    artifacts = STAGE_ARTIFACTS if schema_version == CURRENT_SCHEMA_VERSION else SCHEMA_4_STAGE_ARTIFACTS
+    artifacts = (
+        STAGE_ARTIFACTS
+        if schema_version == CURRENT_SCHEMA_VERSION
+        else SCHEMA_5_STAGE_ARTIFACTS if schema_version == 5 else SCHEMA_4_STAGE_ARTIFACTS
+    )
     for stage in sorted(artifacts):
         if any(name in present for name in artifacts[stage]):
             reached = max(reached, stage)

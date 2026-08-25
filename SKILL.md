@@ -10,7 +10,7 @@ disallowed-tools: Skill, Agent, Task
 compatibility: Claude Code only. Supports macOS and Windows with Python 3.9 or newer.
 metadata:
   author: 新蓝标数字 · 汽车事业群 · AI 内容中台
-  version: 4.2.2
+  version: 4.3.0
   created: 2026-08-22
   last_reviewed: 2026-08-25
   review_interval_days: 90
@@ -32,7 +32,8 @@ metadata:
 3. **一个工作空间只绑定一个品牌知识库。** 自主检索不能越过绑定根；老师显式提供并登记的附件可以位于根外。
 4. **生成前必须确认写法。** 生成任务不允许零轮访谈。普通任务一到两轮；只有未解决的事实或来源硬冲突才逐轮追加。
 5. **来源没有明确支持时，不写强事实。** `唯一、全部、普遍、均、最高` 等词必须在核验时检查比较范围；没有来源支持就改成有边界的分析判断。
-6. **默认只有一份正文。** `delivery.md` 是老师唯一修改入口；`run.json`、`verify.json` 是机器记录，`delivery-check.md` 单独保存交付核对卡与实际来源。扩展研究仍写入 `run.json`；真实反馈才增加 `feedback.json`。
+6. **全品牌硬规则不可被覆盖。** 事实与证据、绝对化与排名、竞品与内部产品、主体归属、状态与安全、引语与保密、敏感与合规按 `policies/common-policy.yaml` 执行；品牌、品类和老师偏好只能覆盖其中的中文表达默认值。
+7. **默认只有一份正文。** `delivery.md` 是老师唯一修改入口；`run.json`、`verify.json` 是机器记录，`delivery-check.md` 单独保存交付核对卡与实际来源。扩展研究仍写入 `run.json`；真实反馈才增加 `feedback.json`。
 
 模型和 effort 由用户在当前 Claude Code 会话中自行选择；BlueInk 不指定、不切换。系统只记录实际阶段耗时，不设置硬时限、自动超时或质量降级。
 
@@ -103,13 +104,14 @@ $BLUEINK open --mode 生成 --brand "<本次品牌>"
 
 ## 默认生成
 
-开启运行后只读取：
+开启运行后只读取一份通用规范和一份运行指导：
 
 ```text
+${CLAUDE_PLUGIN_ROOT}/policies/common-policy.yaml
 ${CLAUDE_PLUGIN_ROOT}/references/generate.md
 ```
 
-它定义逐轮访谈、轻量方向保存、唯一正文交付和交付后的受限核验。不要再读取旧的阶段协议或把策略、程序、回执拆成多份文件。
+通用规范是所有品牌共用的硬规则与中文表达默认值；`generate.md` 定义逐轮访谈、轻量方向保存、交付前规范检查、唯一正文交付和交付后的受限核验。不要再读取旧的阶段协议或把策略、程序、回执拆成多份文件。
 
 ## 条件路由
 
@@ -131,7 +133,15 @@ $BLUEINK save --run "<run_id>" --kind decision <<'BLUEINK_JSON'
 BLUEINK_JSON
 ```
 
-随后直接写 `delivery.md`，立即执行：
+随后直接写 `delivery.md`，逐条检查通用硬规则并把结果绑定到当前正文哈希：
+
+```bash
+$BLUEINK save --run "<run_id>" --kind policy <<'BLUEINK_JSON'
+{"hits":[]}
+BLUEINK_JSON
+```
+
+脚本会把当前规范版本和全部硬规则编号写进回执。`hits` 非空时不能交付：先按对应规则修复正文，再重新执行 `save --kind policy`。检查通过后立即执行：
 
 ```bash
 $BLUEINK handoff --run "<run_id>"
@@ -161,6 +171,7 @@ $BLUEINK close --run "<run_id>"
 
 - 不把“信息已经足够”当成跳过方向确认的理由。
 - 不调用 Skill 工具，不加载其他 Skill、斜杠命令或品牌写作助手；更具体的品牌 Skill 也不能替代本运行合同。
+- 不用品牌、品类、附件或老师偏好覆盖 `policies/common-policy.yaml` 的硬规则；出现冲突时停止交付并指出规则与原句。
 - 不提供固定的“专业／活泼／克制”风格菜单；写法选项必须来自本次事实、受众和传播目标。
 - 不为凑 A/B 只换标题、措辞或语气。只有一条方向成立时，展示唯一推荐、说明没有备选的原因，并等待确认。
 - 不让核验阶段重新写全文。只检查数字、日期、主体、比较范围、因果和时效等高风险句；最多返回局部修改建议。
@@ -182,4 +193,5 @@ $BLUEINK close --run "<run_id>"
 
 - Claude Code 直接加载 Skill 时 `${CLAUDE_PLUGIN_ROOT}` 可能为空，但加载结果已经给出技能 `Base directory`；使用它，不要重新搜索安装目录。
 - 未绑定项目即使带了附件也必须先完成一次资料源询问；只有老师明确说“本次只用附件”才加 `--one-off`。
-- `handoff` 是正文所有权切换点。之后核验只写 `verify.json`，`close` 只生成 `delivery-check.md`，都不再修改 `delivery.md`。
+- `handoff` 是正文所有权切换点。之后核验只写 `verify.json`，`close` 只生成 `delivery-check.md`，任何步骤都不得修改 `delivery.md`。
+- `save --kind policy` 必须发生在 `handoff` 前，并绑定当前 `delivery.md` 哈希；正文变化后必须重新检查。

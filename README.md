@@ -9,7 +9,7 @@ BlueInk 是一个面向汽车公关文案的证据驱动编辑决策 Skill。
 
 请把本仓库作为完整的 Claude Code 插件安装到当前用户环境。默认使用 `user` scope，使它能在该用户的不同项目中使用。
 
-安装时必须保留运行插件，不能只复制 `SKILL.md`。默认生成只读取 `references/generate.md`；`research.md`、`feedback.md` 和 `troubleshooting.md` 只在对应条件出现时加载。项目首次使用会先绑定一个不包含其他品牌的历史稿件共同根目录；明确附件仍是事实边界，历史终稿只走风格参考轨。正文会先作为唯一可修改稿交付，再继续受限核验；`scripts/` 保存工作空间、索引、正文与三份侧车、阶段耗时和审计能力。源码仓库里的评测夹具与设计文档不属于直装运行包。
+安装时必须保留运行插件，不能只复制 `SKILL.md`。默认生成读取 `policies/common-policy.yaml` 和唯一运行指导 `references/generate.md`；`research.md`、`feedback.md` 和 `troubleshooting.md` 只在对应条件出现时加载。项目首次使用会先绑定一个不包含其他品牌的历史稿件共同根目录；明确附件仍是事实边界，历史终稿只走风格参考轨。正文通过交付前通用规范检查后，才作为唯一可修改稿交付并继续受限核验；`scripts/` 保存工作空间、索引、正文与三份侧车、阶段耗时和审计能力。源码仓库里的评测夹具与设计文档不属于直装运行包。
 
 ### 1. 检查环境
 
@@ -92,7 +92,7 @@ claude plugin details blueink-suite@blueink-suite
 - `blueink-suite@blueink-suite` 已安装、已启用，scope 为 `user`；
 - Claude Code 能识别 1 个 `blueink-suite` Skill；
 - 插件目录不存在根级 `agents/`，运行时只使用当前 `/blueink-suite` 智能体；
-- `references/generate.md` 完整可读，明确成稿前方向确认、`handoff` 唯一正文交付和 `delivery.md / run.json / verify.json / delivery-check.md` 四份默认产物；
+- `policies/common-policy.yaml` 与 `references/generate.md` 完整可读，明确全品牌硬规则、成稿前方向确认、交付前规范检查、`handoff` 唯一正文交付和 `delivery.md / run.json / verify.json / delivery-check.md` 四份默认产物；
 - `references/research.md`、`feedback.md`、`troubleshooting.md` 完整可读且只按条件加载；
 - 新开 Claude Code 会话后，显式入口 `/blueink-suite` 可用。
 
@@ -136,7 +136,7 @@ Windows PowerShell：
 .\install.ps1
 ```
 
-脚本会把完整插件安装到当前用户的 `~/.claude/skills/blueink-suite`。如果目标已存在，不要未经确认使用 `--force` 或 `-Force` 覆盖；先判断它是旧版本、本地修改版，还是一次未完成的安装。
+脚本会把完整插件安装到当前用户的 `~/.claude/skills/blueink-suite`。如果目标已存在，不要未经确认使用 `--force` 或 `-Force` 覆盖；先判断它是已安装版本、本地修改版，还是一次未完成的安装。
 
 源码直装完成后，同样必须新开 Claude Code 会话并验证 `/blueink-suite`。不要同时保留 marketplace 版与源码直装版，以免出现重复入口或版本混淆。
 

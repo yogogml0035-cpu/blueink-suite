@@ -1,5 +1,5 @@
 {
-  "run_id": "20260825-100008-schema4",
+  "run_id": "20260825-100009-policy-pass",
   "brand": "品牌甲",
   "mode": "生成",
   "verdict": "pass",
@@ -9,7 +9,7 @@
     {"id": "A3", "name": "动态访谈", "status": "pass", "detail": "通过", "evidence": []},
     {"id": "A4", "name": "阶段边界", "status": "pass", "detail": "通过", "evidence": []},
     {"id": "A5", "name": "输出有效", "status": "pass", "detail": "通过", "evidence": []},
-    {"id": "A6", "name": "通用规范", "status": "skip", "detail": "历史 schema 4 没有通用规范回执，按原合同只读审计", "evidence": []}
+    {"id": "A6", "name": "通用规范", "status": "pass", "detail": "通过", "evidence": []}
   ],
   "failed": [],
   "missing_artifacts": []

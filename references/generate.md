@@ -1,9 +1,13 @@
 # 默认生成快线
 
-这份文件是生成任务唯一默认加载的运行指导。目标是先交付唯一的完整可修改正文，再做一次受限复核；不要把它重新拆成多个角色或阶段文档。
+这份文件是生成任务唯一默认加载的运行指导；固定通用规范已由根入口同时从 `policies/common-policy.yaml` 加载。目标是先交付唯一的完整可修改正文，再做一次受限复核；不要把它重新拆成多个角色或阶段文档。
 显式启动后，不调用 Skill 工具，不加载其他 Skill、斜杠命令或品牌写作助手；即使 Claude Code 暴露了更具体的品牌或品类 Skill，也只把本次附件和知识库内容作为证据，不切换运行方法。
 
 只记录实际阶段耗时，不设置硬时限、自动超时或为了速度截断正文。
+
+## 0. 先确定规则优先级
+
+`policies/common-policy.yaml` 的 `hard_rules` 是所有品牌、品类和渠道共同的交付底线，任务附件、历史终稿、品牌偏好和老师写法选择都不能覆盖。`expression_defaults` 是中文表达默认值；品牌、体裁、渠道或发言人的明确规范可以覆盖它，但不能借此绕过硬规则。通用规范限制“什么不能写”，不为任何事实提供来源。
 
 ## 1. 先读材料，再问一个问题
 
@@ -99,7 +103,17 @@ $BLUEINK retrieve --track style --category "<本次品类>" --limit 3 --run "<ru
 
 如果成稿时发现主线或事实不成立，停止写作并回到对应问题；不要在正文里偷偷换方向。
 
-正文写完立即运行：
+正文写完先逐条检查 `policies/common-policy.yaml` 的全部 `hard_rules`。只记录真正命中的原句；中文表达默认值在写作时修正，不写进红线：
+
+```bash
+$BLUEINK save --run "<run_id>" --kind policy <<'BLUEINK_JSON'
+{
+  "hits": []
+}
+BLUEINK_JSON
+```
+
+命中项使用 `{"rule_id":"G-COMP-001","quote":"正文原句片段","reason":"为什么命中","action":"如何修复"}`。脚本从唯一规范源记录当前版本和全部硬规则编号，并把检查结果与正文哈希绑定；`hits` 非空时，修复正文并重新检查，不能带着红线执行 `handoff`。检查通过后立即运行：
 
 ```bash
 $BLUEINK handoff --run "<run_id>"
@@ -128,10 +142,14 @@ $BLUEINK handoff --run "<run_id>"
     {"quote": "能唯一定位正文句子的短片段", "judgement": "drifted|unsourced|stale", "risk": "问题类型", "source_quote": "可选的来源原句", "action": "建议替换为……"}
   ],
   "cross_brand": [],
-  "redline_hits": [],
+  "redline_hits": [
+    {"rule_id": "G-COMP-001", "quote": "能定位正文的片段", "reason": "为什么命中", "action": "建议替换为……"}
+  ],
   "editorial_risks": []
 }
 ```
+
+没有红线时 `redline_hits` 必须是空数组。这里仍使用交付前加载的同一版通用规范；交付后的发现只能记录问题，不能覆盖正文。
 
 附件快线不需要再次抄写 `sources_used`；脚本直接使用 `open` 已登记的附件。`quote` 不必手抄整句，只要能在脚本提取的高风险句中唯一定位即可。
 
@@ -141,7 +159,7 @@ $BLUEINK handoff --run "<run_id>"
 - `有待确认项`：只有 `drifted` 或 `stale`；
 - `暂不建议提交`：出现 `unsourced`、跨品牌或红线。
 
-编辑红队不再默认单独运行。只有传播主线存在明显反方、敏感内容或高影响推断时，把最多三条问题写进 `editorial_risks`；弱问题不自动触发全文返工。
+编辑风险只在传播主线存在明显反方、敏感内容或高影响推断时进入 `editorial_risks`，最多三条；弱问题不自动触发全文返工。
 
 ## 6. 生成独立核对卡并归档
 
@@ -166,6 +184,8 @@ $BLUEINK handoff --run "<run_id>"
 | 触发条件 | 处理 | 仍失败 |
 |---|---|---|
 | `save decision` 拒绝 | 按报错只修轻量方向字段；不抽取事实原子 | 正文仍按已确认方向生成，记录问题放到交付后处理 |
+| `save policy` 判 blocked | 按命中的规则修复 `delivery.md`，重新逐条检查 | 仍命中就不 `handoff`，把阻塞原句交给老师裁决 |
+| `handoff` 报规范检查失效 | 正文或规范版本已变化，重新执行 `save --kind policy` | 不绕过检查、不复用旧哈希 |
 | 事实来源越界或不存在 | 回到附件／研究边界，不静默换来源 | 向老师问一个阻塞问题 |
 | `handoff` 后发现事实问题 | 不改 `delivery.md`，只在 `issues` 给局部建议 | 由老师决定是否采用 |
 | `save verify` 判有待确认 | 保留老师正文并展示具体待确认句 | 不冒充可提交终稿 |

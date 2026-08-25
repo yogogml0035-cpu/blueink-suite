@@ -17,12 +17,12 @@
     retrieve     按任务检索证据切片
     official     官方来源白名单：查看、追加、访问前校验 URL
     open         开启一次运行并创建运行记录
-    save         校验并保存本次方向或核验问题
+    save         校验并保存本次方向、通用规范检查或核验问题
     handoff      立即展示并登记老师可修改的唯一正文
     close        生成交付核对卡并归档一次运行
     purge        按留存策略清理旧运行记录
     memory       条件化记忆的读写
-    audit        五项验收契约的机械审计
+    audit        六项验收契约的机械审计
     doctor       一条命令看清当前状态
 
 所有命令都支持 ``--json`` 输出，方便当前阶段直接消费。
@@ -328,7 +328,7 @@ def cmd_save(args: argparse.Namespace) -> int:
     except json.JSONDecodeError as exc:
         raise ValueError(f"save 输入不是合法 JSON：第 {exc.lineno} 行第 {exc.colno} 列") from exc
     data = run_record.save_payload(args.run, args.kind, payload, start=args.project)
-    artifact = "run.json" if args.kind == "decision" else "verify.json"
+    artifact = "verify.json" if args.kind == "verify" else "run.json"
     _emit(
         data,
         args.json,
@@ -703,9 +703,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="记录用户实际使用的 Claude Code 显式入口；同名冲突时可能是命名空间形式")
     p.set_defaults(func=cmd_open)
 
-    p = sub.add_parser("save", help="校验并保存方向或核验问题")
+    p = sub.add_parser("save", help="校验并保存方向、通用规范检查或核验问题")
     p.add_argument("--run", required=True)
-    p.add_argument("--kind", required=True, choices=["decision", "verify"])
+    p.add_argument("--kind", required=True, choices=["decision", "policy", "verify"])
     p.add_argument("--input", help="JSON 输入文件；不提供时从标准输入读取")
     p.set_defaults(func=cmd_save)
 
@@ -743,7 +743,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="同一传播事件内的同向证据，只 +0.05")
     p.set_defaults(func=cmd_memory)
 
-    p = sub.add_parser("audit", help="五项验收契约的机械审计")
+    p = sub.add_parser("audit", help="六项验收契约的机械审计")
     p.add_argument("--input", help="运行记录目录")
     p.add_argument("--run", help="run_id，等价于 --input <runs>/<run_id>")
     p.add_argument("--output", help="把结论 JSON 写到这里")

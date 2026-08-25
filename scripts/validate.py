@@ -8,7 +8,7 @@
 - 根级 ``agents/`` 是否不存在，默认快线与三份条件指导是否完整；
 - 文档里引用的文件是否真的存在（断链的"按需读取"等于没有那一节）；
 - 技能本体是否混进了品牌语料或绝对路径（技能必须能整目录复制给另一位老师）；
-- 五项验收契约的名称有没有被悄悄改掉；
+- 六项验收契约的名称有没有被悄悄改掉；
 - 复审日期是否已经越过声明的复审周期；
 - 默认生成是否明确单 Skill、单智能体、强制方向确认、先交唯一正文并把核对信息拆成侧车；
 - `evolve --correct` 的落点标题是否还在，以及它有没有跑回 `SKILL.md`（首读层是方法论）；
@@ -29,8 +29,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
-# 五项验收契约的名称。改名等于换掉一项验收标准，必须显式。
-CONTRACTS = ("入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效")
+import miniyaml
+
+# 六项验收契约的名称。改名等于换掉一项验收标准，必须显式。
+CONTRACTS = ("入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效", "通用规范")
 
 GUIDES = {
     "generate": "默认生成快线",
@@ -107,7 +109,7 @@ def check(root: Path) -> list[str]:
             if name not in body and name not in (root / "references/troubleshooting.md").read_text(
                 encoding="utf-8"
             ):
-                problems.append(f"五项验收契约里的「{name}」在文档中找不到")
+                problems.append(f"六项验收契约里的「{name}」在文档中找不到")
 
     # Claude Code 当前支持插件根级单个 SKILL.md。再放一个同名 commands/ 入口会
     # 形成两个 /blueink-suite 定义，不是“双保险”，而是解析顺序依赖。
@@ -160,6 +162,8 @@ def check(root: Path) -> list[str]:
             ("run.json", "默认生成缺新版聚合运行记录"),
             ("delivery.md", "默认生成缺业务交付文件"),
             ("delivery-check.md", "默认生成缺独立交付核对卡"),
+            ("policies/common-policy.yaml", "默认生成缺全品牌通用规范"),
+            ("save --kind policy", "默认生成缺交付前通用规范检查"),
             ("不调用 Skill 工具，不加载其他 Skill、斜杠命令或品牌写作助手", "默认生成允许加载其他 Skill 旁路运行合同"),
             ("最终回复的第一个可见区块必须是", "默认生成允许在交付正文前先报路径或过程说明"),
         ):
@@ -213,6 +217,48 @@ def check(root: Path) -> list[str]:
     problems += product_voice(root)
     problems += correction_target(root)
     problems += documented_flags(root)
+    problems += common_policy_contract(root)
+    return problems
+
+
+def common_policy_contract(root: Path) -> list[str]:
+    """通用规范必须可解析、可定位，并同时包含硬规则与表达默认值。"""
+    path = root / "policies" / "common-policy.yaml"
+    if not path.is_file():
+        return ["缺 policies/common-policy.yaml——全品牌规范没有唯一维护源"]
+    try:
+        data = miniyaml.load_file(path)
+    except (OSError, miniyaml.YamlError) as exc:
+        return [f"policies/common-policy.yaml 无法解析：{exc}"]
+    problems: list[str] = []
+    if not isinstance(data, dict):
+        return ["policies/common-policy.yaml 顶层必须是对象"]
+    for field in ("version", "owner", "last_reviewed", "scope"):
+        if not str(data.get(field) or "").strip():
+            problems.append(f"policies/common-policy.yaml 缺 {field}")
+    all_ids: list[str] = []
+    for group, required in (
+        ("hard_rules", {"id", "name", "rule", "allow", "on_hit"}),
+        ("expression_defaults", {"id", "name", "rule"}),
+    ):
+        items = data.get(group)
+        if not isinstance(items, list) or not items:
+            problems.append(f"policies/common-policy.yaml 的 {group} 必须是非空数组")
+            continue
+        ids: list[str] = []
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                problems.append(f"{group}[{index}] 必须是对象")
+                continue
+            missing = sorted(field for field in required if not str(item.get(field) or "").strip())
+            if missing:
+                problems.append(f"{group}[{index}] 缺字段 {missing}")
+            ids.append(str(item.get("id") or ""))
+        if len(ids) != len(set(ids)):
+            problems.append(f"{group} 含重复 id")
+        all_ids.extend(ids)
+    if len(all_ids) != len(set(all_ids)):
+        problems.append("hard_rules 与 expression_defaults 之间含重复 id")
     return problems
 
 
@@ -238,6 +284,7 @@ def claude_only_distribution(root: Path) -> list[str]:
     """安装说明与脚本不得继续承诺其它宿主，也不得带作者机器路径。"""
     problems: list[str] = []
     active = [root / "README.md", root / "SKILL.md", *sorted((root / "references").rglob("*.md")),
+              *sorted((root / "policies").rglob("*.yaml")),
               *sorted((root / "assets").glob("*.md"))]
     joined = "\n".join(p.read_text(encoding="utf-8") for p in active if p.is_file())
     for forbidden in ("/Users/", "/tmp/", "~/.codex/skills", "~/.agents/skills", "Codex CLI"):
@@ -264,6 +311,13 @@ def product_voice(root: Path) -> list[str]:
         r"破坏性变更", r"第\s*\d+\s*轮(?:审查|修改|迭代)",
         r"(?:旧版|老版本)(?:逻辑|实现)", r"(?:已经|已)(?:删除|移除)",
         r"(?:之前|此前)版本", r"迁移自旧版", r"曾经实现",
+        r"(?m)^[*-]\s*新增(?:全品牌|通用|产品|系统|功能|能力|规则|命令|机制|规范|层|合同)",
+        r"(?:本次|此次|这次)(?:改动|修改|修复|升级|重构)",
+        r"(?:由|从).{0,40}(?:改为|升级为|迁移到)",
+        r"(?:旧|老|此前|之前|历史)(?:版本|逻辑|实现|架构|流程|合同)",
+        r"(?:版本|系统|架构|运行|schema).{0,16}(?:升级为|改造成|重构为)",
+        r"不再(?:默认|生成|加载|使用|保留|写入|输出|调用)",
+        r"(?:多次|反复).{0,12}(?:修改|改动|迭代|重构)",
         r"什么被保留，什么不再声称", r"不再声称", r"兼容既有", r"兼容审计",
         r"被否掉的(?:方案|替代方案)", r"旧前提|新前提", r"中转站",
         r"一次真实(?:失败|教训)", r"从一次真实运行", r"真实教训",
@@ -275,6 +329,7 @@ def product_voice(root: Path) -> list[str]:
         root / ".claude-plugin" / "plugin.json",
         root / ".claude-plugin" / "marketplace.json",
         *sorted((root / "references").rglob("*.md")),
+        *sorted((root / "policies").rglob("*.yaml")),
         *sorted((root / "assets").glob("*.md")),
         *sorted((root / "assets").glob("*.json")),
         *sorted((root / "assets").glob("*.yaml")),
@@ -355,7 +410,7 @@ def correction_target(root: Path) -> list[str]:
 
 
 def guide_contract(root: Path) -> list[str]:
-    """根入口只默认加载 generate，其余三份指导必须条件触发。"""
+    """根入口默认加载通用规范和 generate，其余三份指导必须条件触发。"""
     skill = root / "SKILL.md"
     if not skill.is_file():
         return ["缺 SKILL.md"]
@@ -363,6 +418,8 @@ def guide_contract(root: Path) -> list[str]:
     problems: list[str] = []
     if "开启运行后只读取" not in text or "references/generate.md" not in text:
         problems.append("SKILL.md 没有把 generate.md 设为唯一默认运行指导")
+    if "policies/common-policy.yaml" not in text:
+        problems.append("SKILL.md 没有默认加载全品牌通用规范")
     for guide in ("research", "feedback", "troubleshooting"):
         if f"references/{guide}.md" not in text:
             problems.append(f"SKILL.md 没有条件路由到 references/{guide}.md")

@@ -23,7 +23,7 @@ $BLUEINK audit --run <run_id>
 
 `pass` 只说明入口、品牌隔离、方向确认、一份正文、核对侧车和来源结论没有违反机械合同，不代表文案质量已经被机器证明。`incomplete` 表示运行尚未完成；`violated` 按 `evidence` 指向的具体字段处理。
 
-五项审计契约保持为：入口唯一、单品牌隔离、动态访谈、阶段边界、输出有效。
+六项审计契约保持为：入口唯一、单品牌隔离、动态访谈、阶段边界、输出有效、通用规范。
 
 ## `save` 失败
 
@@ -37,6 +37,9 @@ $BLUEINK audit --run <run_id>
 | 来源未登记或越界 | 用 `open --attach` 登记，或确认来源位于绑定根内 |
 | 强比较词未授权 | 补足来源范围后授权；否则改成有限定条件的分析判断 |
 | `verify` 早于正文 | 先写 `delivery.md` 并执行 `handoff`，不要造空核验 |
+| `handoff` 要求通用规范检查 | 对当前 `delivery.md` 执行 `save --kind policy`，逐条覆盖 `policies/common-policy.yaml` 的全部硬规则 |
+| `handoff` 报规范哈希失效 | 正文在检查后变化；重新执行 `save --kind policy`，不要复用旧结论 |
+| `save policy` 判 blocked | 根据 `rule_id`、原句和 action 修复正文；仍无法处理时把这一条交给老师裁决，不交付 |
 | 轻量核验早于 `handoff` | 先展示完整可修改稿件并切换正文所有权 |
 | `handoff` 后正文哈希变化 | 不自动覆盖；旧核验不冒充当前稿，只向老师报告局部建议 |
 
@@ -86,8 +89,8 @@ claude plugin enable blueink-suite@blueink-suite --scope user
 
 ## Gotchas
 
-- 新任务写 schema 5 的 `run.json`；schema 4 与 `meta.json` 历史运行只读兼容，不要混写合同。
+- 新任务写 schema 6 的 `run.json`；非 schema 6 运行记录只用于只读审计，不要混写合同。
 - `save` 失败不会覆盖正式 JSON；修输入后重试当前写入即可。
 - Claude Code 加载结果已经给出 Skill `Base directory`；`${CLAUDE_PLUGIN_ROOT}` 为空时用它，不要重新搜索安装目录。
-- `handoff` 会展示 `delivery.md` 并记录正文哈希；之后当前智能体不再改它。
+- `handoff` 会展示 `delivery.md` 并记录正文哈希；之后正文归老师修改，当前智能体只能记录核验问题和局部建议。
 - `close` 只生成 `delivery-check.md`；正文版本变化时会拒绝把旧核验用于老师修改后的版本。
