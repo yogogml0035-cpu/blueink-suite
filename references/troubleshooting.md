@@ -7,10 +7,10 @@
 | 现象 | 先看 | 判断 |
 |---|---|---|
 | 问错了、方向没确认、事实范围错 | `run.json` | `interview`、`direction`；进入扩展研究时再看 `facts`、`decision` |
-| 正文没有执行已确认方向 | `draft.md` + `run.json` | 方向、素材取舍和正文是否一致 |
-| 初稿迟迟没有展示 | `run.json.metrics` | `direction_saved_at`、`draft_handoff_at` 与两段实际耗时 |
+| 正文没有执行已确认方向 | `delivery.md` + `run.json` | 方向、素材取舍和正文是否一致 |
+| 稿件迟迟没有展示 | `run.json.metrics` | `direction_saved_at`、`delivery_handoff_at` 与两段实际耗时 |
 | 强比较、数字、时效或来源有问题 | `verify.json` | `risk_sentences`、`claims`、`coverage`、`sources_used` |
-| 老师看到的内容不完整 | `delivery.md` | 正文、结论和实际来源是否齐全 |
+| 核对结论或来源缺失 | `delivery-check.md` | 核对结论和实际来源是否齐全 |
 
 新运行不应出现 `interview.json`、`evidence.json`、`strategy.json`、`program.json`、`write-receipt.json` 或 `adversary.json`。这些只属于 3.x 历史运行。
 
@@ -21,7 +21,7 @@ $BLUEINK doctor
 $BLUEINK audit --run <run_id>
 ```
 
-`pass` 只说明入口、品牌隔离、方向确认、四份产物和来源结论没有违反机械合同，不代表文案质量已经被机器证明。`incomplete` 表示运行尚未完成；`violated` 按 `evidence` 指向的具体字段处理。
+`pass` 只说明入口、品牌隔离、方向确认、一份正文、核对侧车和来源结论没有违反机械合同，不代表文案质量已经被机器证明。`incomplete` 表示运行尚未完成；`violated` 按 `evidence` 指向的具体字段处理。
 
 五项审计契约保持为：入口唯一、单品牌隔离、动态访谈、阶段边界、输出有效。
 
@@ -36,8 +36,8 @@ $BLUEINK audit --run <run_id>
 | 普通生成超过两轮 | 把额外轮次改为真实 `hard_conflict`；不是硬冲突就合并到写法选择 |
 | 来源未登记或越界 | 用 `open --attach` 登记，或确认来源位于绑定根内 |
 | 强比较词未授权 | 补足来源范围后授权；否则改成有限定条件的分析判断 |
-| `verify` 早于正文 | 先写 `draft.md`，不要造空核验 |
-| 轻量核验早于 `handoff` | 先展示完整可修改初稿并切换正文所有权 |
+| `verify` 早于正文 | 先写 `delivery.md` 并执行 `handoff`，不要造空核验 |
+| 轻量核验早于 `handoff` | 先展示完整可修改稿件并切换正文所有权 |
 | `handoff` 后正文哈希变化 | 不自动覆盖；旧核验不冒充当前稿，只向老师报告局部建议 |
 
 ## 参数索引
@@ -86,8 +86,8 @@ claude plugin enable blueink-suite@blueink-suite --scope user
 
 ## Gotchas
 
-- 新任务写 `run.json`；`meta.json` 只表示 3.x 历史运行，不要混写两套合同。
+- 新任务写 schema 5 的 `run.json`；schema 4 与 `meta.json` 历史运行只读兼容，不要混写合同。
 - `save` 失败不会覆盖正式 JSON；修输入后重试当前写入即可。
 - Claude Code 加载结果已经给出 Skill `Base directory`；`${CLAUDE_PLUGIN_ROOT}` 为空时用它，不要重新搜索安装目录。
-- `handoff` 会展示初稿并记录正文哈希；之后当前智能体不再写 `draft.md`。
-- `close` 会从正文和核验结论生成 `delivery.md`，正文版本变化时会拒绝套用旧核验。
+- `handoff` 会展示 `delivery.md` 并记录正文哈希；之后当前智能体不再改它。
+- `close` 只生成 `delivery-check.md`；正文版本变化时会拒绝把旧核验用于老师修改后的版本。

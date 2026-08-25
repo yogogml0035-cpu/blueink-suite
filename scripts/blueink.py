@@ -18,8 +18,8 @@
     official     官方来源白名单：查看、追加、访问前校验 URL
     open         开启一次运行并创建运行记录
     save         校验并保存本次方向或核验问题
-    handoff      立即展示并登记老师可修改的初稿
-    close        生成交付内容并归档一次运行
+    handoff      立即展示并登记老师可修改的唯一正文
+    close        生成交付核对卡并归档一次运行
     purge        按留存策略清理旧运行记录
     memory       条件化记忆的读写
     audit        五项验收契约的机械审计
@@ -27,7 +27,7 @@
 
 所有命令都支持 ``--json`` 输出，方便当前阶段直接消费。
 
-这里**没有**改稿编排与版本回退命令，这是边界不是遗漏：可修改初稿交给老师后，
+这里**没有**改稿编排与版本回退命令，这是边界不是遗漏：可修改正文交给老师后，
 当前智能体只提供高风险句核验和局部替换建议，不再自动覆盖正文；老师后续的修改意见
 只进入学习外循环。
 "改稿退到哪一层"是另一个产品，第一版不做。self_check.py --claims 会双向核对这份
@@ -333,9 +333,9 @@ def cmd_save(args: argparse.Namespace) -> int:
 
 
 def cmd_handoff(args: argparse.Namespace) -> int:
-    result = run_record.handoff_draft(args.run, start=args.project)
+    result = run_record.handoff_delivery(args.run, start=args.project)
     metrics = result.get("metrics") or {}
-    direction_seconds = metrics.get("direction_to_draft_seconds")
+    direction_seconds = metrics.get("direction_to_delivery_seconds")
     elapsed = (
         f"方向确认后 {direction_seconds:.1f} 秒"
         if isinstance(direction_seconds, (int, float)) else "方向确认后耗时已记录"
@@ -344,11 +344,11 @@ def cmd_handoff(args: argparse.Namespace) -> int:
         result,
         args.json,
         [
-            f"可修改初稿已生成（{elapsed}）。",
-            "正文从现在起归老师修改；当前智能体继续核验，但不再自动覆盖 draft.md。",
-            f"路径：{result['draft_path']}",
+            f"可修改稿件已生成（{elapsed}）。",
+            "delivery.md 是唯一正文；当前智能体继续核验，但不再自动覆盖它。",
+            f"路径：{result['delivery_path']}",
             "",
-            str(result["draft"]),
+            str(result["delivery"]),
         ],
     )
     return 0
@@ -357,15 +357,20 @@ def cmd_handoff(args: argparse.Namespace) -> int:
 def cmd_close(args: argparse.Namespace) -> int:
     current = run_record.load_meta(args.run, start=args.project)
     delivery = None
-    if current.get("mode") == "生成" and current.get("schema_version") == 4:
-        delivery = run_record.build_delivery(args.run, start=args.project)
+    delivery_check = None
+    if current.get("mode") == "生成":
+        if current.get("schema_version") != run_record.CURRENT_SCHEMA_VERSION:
+            raise ValueError("旧版运行只读兼容，不能用新版 close 改写交付文件")
+        run_dir = run_record.run_dir_for(args.run, start=args.project)
+        delivery = run_dir / "delivery.md"
+        delivery_check = run_record.build_delivery_check(args.run, start=args.project)
     meta = run_record.close_run(args.run, start=args.project)
-    lines = [f"{args.run} 已归档，产出 {len(meta.get('artifacts') or [])} 个文件"]
+    lines = []
     if delivery:
-        lines.append(f"交付：{delivery}")
-    lines.append("需要定位后台问题时再运行 audit；默认交付不追加审计轮次。")
-    if delivery:
-        lines.extend(["", delivery.read_text(encoding="utf-8").strip()])
+        lines.append(delivery.read_text(encoding="utf-8").strip())
+    if delivery_check:
+        lines.extend(["", f"核对结论与实际来源：{delivery_check}"])
+    lines.append(f"运行已归档：{args.run}（{len(meta.get('artifacts') or [])} 个文件）")
     _emit(
         meta,
         args.json,
@@ -697,11 +702,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--input", help="JSON 输入文件；不提供时从标准输入读取")
     p.set_defaults(func=cmd_save)
 
-    p = sub.add_parser("handoff", help="展示并登记老师可修改的初稿")
+    p = sub.add_parser("handoff", help="展示并登记老师可修改的唯一正文")
     p.add_argument("--run", required=True)
     p.set_defaults(func=cmd_handoff)
 
-    p = sub.add_parser("close", help="生成交付内容并归档一次运行")
+    p = sub.add_parser("close", help="生成交付核对卡并归档一次运行")
     p.add_argument("--run", required=True)
     p.set_defaults(func=cmd_close)
 

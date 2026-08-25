@@ -754,8 +754,15 @@ def check_output(run_dir: Path, meta: Any) -> Check:
 # --- 汇总 -------------------------------------------------------------------
 
 
-FAST_REQUIRED_BY_MODE = {
+SCHEMA_4_REQUIRED_BY_MODE = {
     "生成": [("run.json",), ("draft.md",), ("verify.json",), ("delivery.md",)],
+    "绑定": [("run.json",)],
+    "学习": [("run.json",)],
+    "定位": [("run.json",)],
+}
+
+CURRENT_REQUIRED_BY_MODE = {
+    "生成": [("run.json",), ("delivery.md",), ("verify.json",), ("delivery-check.md",)],
     "绑定": [("run.json",)],
     "学习": [("run.json",)],
     "定位": [("run.json",)],
@@ -791,8 +798,11 @@ def _fast_check_entry(record: Any, error: str | None) -> Check:
         check.fail(f"started_via 不是受支持的显式入口 {ENTRY_ALIASES}", "run.json:started_via")
     if not str(record.get("run_id") or ""):
         check.fail("run.json 缺 run_id", "run.json:run_id")
-    if record.get("schema_version") != 4:
-        check.fail("run.json.schema_version 必须为 4", "run.json:schema_version")
+    if record.get("schema_version") not in (4, run_record.CURRENT_SCHEMA_VERSION):
+        check.fail(
+            f"run.json.schema_version 必须为 4 或 {run_record.CURRENT_SCHEMA_VERSION}",
+            "run.json:schema_version",
+        )
     return check
 
 
@@ -863,7 +873,10 @@ def _fast_check_stages(run_dir: Path, record: Any, verify: Any, verify_error: st
     if verify_error:
         check.fail(verify_error, "verify.json")
     present = {path.name for path in run_dir.iterdir() if path.is_file()}
-    leaked = sorted(present & LEGACY_GENERATION_FILES)
+    obsolete = set(LEGACY_GENERATION_FILES)
+    if isinstance(record, dict) and record.get("schema_version") == run_record.CURRENT_SCHEMA_VERSION:
+        obsolete.update({"draft.md", "draft-a.md", "draft-b.md"})
+    leaked = sorted(present & obsolete)
     if leaked:
         check.fail(f"新版运行仍生成旧阶段文件：{'、'.join(leaked)}", leaked[0])
     if isinstance(record, dict) and str(record.get("mode") or "") == "生成":
@@ -888,20 +901,24 @@ def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
     if not isinstance(record, dict) or str(record.get("mode") or "生成") != "生成":
         check.skip("当前模式不产出正文")
         return check
-    draft = _text(run_dir, "draft.md")
-    if draft is None:
-        check.skip("运行还没成稿（缺 draft.md）")
+    current = record.get("schema_version") == run_record.CURRENT_SCHEMA_VERSION
+    body_name = "delivery.md" if current else "draft.md"
+    body = _text(run_dir, body_name)
+    if body is None:
+        check.skip(f"运行还没成稿（缺 {body_name}）")
         return check
     decision = record.get("decision")
-    draft_first = isinstance(decision, dict) and decision.get("path") == "attachment-draft-first"
-    if not draft_first:
+    fast_path = isinstance(decision, dict) and decision.get("path") in {
+        "attachment-draft-first", "attachment-delivery-first",
+    }
+    if not fast_path:
         allowed_words = {
             word for fact in (record.get("facts") or []) if isinstance(fact, dict)
             for word in (fact.get("allowed_strong_words") or [])
         }
         for word in run_record.STRONG_WORDS:
-            if word in draft and word not in allowed_words:
-                check.fail(f"正文使用未获来源范围授权的强比较词「{word}」", "draft.md")
+            if word in body and word not in allowed_words:
+                check.fail(f"正文使用未获来源范围授权的强比较词「{word}」", body_name)
 
     if not isinstance(verify, dict):
         if _archived(record):
@@ -914,29 +931,48 @@ def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
         check.fail(f"核验结论应为「{expected}」", "verify.json:verdict")
     if not (verify.get("sources_used") or []):
         check.fail("sources_used 为空", "verify.json:sources_used")
-    if draft_first:
+    if fast_path:
         reviewed = [
             str(item.get("quote") or "") for item in (verify.get("risk_sentences") or [])
             if isinstance(item, dict)
         ]
         for word in run_record.STRONG_WORDS:
-            if word in draft and not any(word in quote for quote in reviewed):
-                check.fail(f"附件初稿里的强比较词「{word}」没有进入轻量复核清单", "verify.json")
+            if word in body and not any(word in quote for quote in reviewed):
+                check.fail(f"附件稿件里的强比较词「{word}」没有进入轻量复核清单", "verify.json")
 
-    delivery = _text(run_dir, "delivery.md")
-    if delivery is None:
-        if _archived(record):
-            check.fail("运行已归档却没有 delivery.md", "delivery.md")
+    if current:
+        for mixed_section in ("交付核对卡", "交付前核对卡", "实际来源"):
+            if mixed_section in body:
+                check.fail(f"delivery.md 混入{mixed_section}，正文与核对信息没有分开", "delivery.md")
+        delivery_check = _text(run_dir, "delivery-check.md")
+        if delivery_check is None:
+            if _archived(record):
+                check.fail("运行已归档却没有 delivery-check.md", "delivery-check.md")
+            else:
+                check.skip("运行尚未归档，delivery-check.md 还未生成")
         else:
-            check.skip("运行尚未归档，delivery.md 还未生成")
+            if str(verify.get("verdict") or "") not in delivery_check:
+                check.fail("delivery-check.md 没有使用 verify.json 的结论", "delivery-check.md")
+            if "实际来源" not in delivery_check:
+                check.fail("delivery-check.md 缺实际来源", "delivery-check.md")
     else:
-        if str(verify.get("verdict") or "") not in delivery:
-            check.fail("delivery.md 没有使用 verify.json 的结论", "delivery.md")
-        if "实际来源" not in delivery:
-            check.fail("delivery.md 缺实际来源", "delivery.md")
+        delivery = _text(run_dir, "delivery.md")
+        if delivery is None:
+            if _archived(record):
+                check.fail("运行已归档却没有 delivery.md", "delivery.md")
+            else:
+                check.skip("运行尚未归档，delivery.md 还未生成")
+        else:
+            if str(verify.get("verdict") or "") not in delivery:
+                check.fail("delivery.md 没有使用 verify.json 的结论", "delivery.md")
+            if "实际来源" not in delivery:
+                check.fail("delivery.md 缺实际来源", "delivery.md")
+    artifact_name = "delivery-check.md" if current else "delivery.md"
+    artifact = _text(run_dir, artifact_name)
+    if artifact is not None:
         for leak in ("run.json", "verify.json", ".blueink/runs"):
-            if leak in delivery:
-                check.fail(f"交付泄漏技术轨迹：{leak}", "delivery.md")
+            if leak in artifact:
+                check.fail(f"交付泄漏技术轨迹：{leak}", artifact_name)
                 break
     return check
 
@@ -953,8 +989,13 @@ def audit_fast(run_dir: Path) -> dict[str, Any]:
     ]
     mode = str((record or {}).get("mode") or "生成") if isinstance(record, dict) else "生成"
     present = {path.name for path in run_dir.iterdir() if path.is_file()}
+    required = (
+        CURRENT_REQUIRED_BY_MODE
+        if isinstance(record, dict) and record.get("schema_version") == run_record.CURRENT_SCHEMA_VERSION
+        else SCHEMA_4_REQUIRED_BY_MODE
+    )
     missing = [
-        group[0] for group in FAST_REQUIRED_BY_MODE.get(mode, [])
+        group[0] for group in required.get(mode, [])
         if not any(name in present for name in group)
     ]
     failed = [check.id for check in checks if check.status == "fail"]

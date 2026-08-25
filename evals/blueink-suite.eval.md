@@ -1,6 +1,6 @@
 # blueink-suite 评测契约
 
-这份评测**不判文案好不好**。文案质量由文案老师判断，方法论内核里已经写明第一质量指标是"老师把初稿改到可提交所需的修改量和修改时间明显下降"，那是人来评的。
+这份评测**不判文案好不好**。文案质量由文案老师判断，方法论内核里已经写明第一质量指标是"老师把交付稿改到可提交所需的修改量和修改时间明显下降"，那是人来评的。
 
 这里评的是另三件事：
 
@@ -12,7 +12,7 @@
 
 ```bash
 python3 scripts/blueink.py audit --input <运行记录目录> --output <结论.json>
-python3 scripts/test_state.py          # 状态层回归，188 项检查
+python3 scripts/test_state.py          # 状态层回归，190 项检查
 python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致性 / 变异承重
 ```
 
@@ -30,7 +30,7 @@ python3 scripts/self_check.py          # 自证门：版本底线 / 声明一致
 | `explained` | 每条检查的 detail 非空；被跳过的检查不能写成「通过」 | 把"没查"伪装成"查过了"是最危险的一种输出 |
 | `contracts` | 五项名称依次为：入口唯一、单品牌隔离、动态访谈、阶段边界、输出有效 | 防止某项契约被悄悄改名或换掉 |
 
-**状态层回归检查**（`state-layer` / `explicit-entry` / `stage-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计、附件登记、初稿 `handoff` 和交付后正文冻结，共 188 项；`explicit-entry` 同时检查封闭附件快线与扩展证据路径没有退回全量执行。
+**状态层回归检查**（`state-layer` / `explicit-entry` / `stage-boundaries`）验的是那些"破掉之后没人会立刻发现"的边界。它们不是自证式的字符串断言——`state-layer` 会在临时目录里真的绑定、索引、检索、校验 URL、跑记忆升降、审计、附件登记、唯一正文 `handoff`、核对侧车拆分和交付后正文冻结，共 190 项；`explicit-entry` 同时检查封闭附件快线与扩展证据路径没有退回全量执行。
 
 **自证检查**（`self-claims` / `self-mutation` / `pipeline-wiring`）验的是"声明与实际是否一致"这一类不会报错的漂移。其中 `self-mutation` 是这份规格里的**负向**检查：它往技能副本里注入十一个已知失败形态，断言每一个都会让指定检查转红。
 
@@ -114,7 +114,7 @@ python3 scripts/evolve.py                                # 一次跑完上面全
 5. 长稿只有标题或导语差异时不重复生成两篇全文。
 6. 内部资料与官方来源冲突时暂停裁决，不静默选边。
 7. 明确修改理由、A/B 选择和无理由版本差异，对个人记忆产生不同的置信度变化。
-8. 记录方向确认到可修改初稿的实际耗时，但不设置硬时限；用同 brief、同附件、同方向、同模型比较优化前后运行。
+8. 记录方向确认到可修改交付稿的实际耗时，但不设置硬时限；用同 brief、同附件、同方向、同模型比较优化前后运行。
 
 探针里必须做**事件隔离**：用历史真实需求测试时禁止检索到同一事件的历史终稿，否则测的是复述能力而不是生成能力。
 
@@ -133,7 +133,7 @@ python3 scripts/evolve.py                                # 一次跑完上面全
      "cmd": "python3 scripts/blueink.py check-verdict {output} --check explained"},
     {"id": "contracts", "text": "五项契约名称未被改名或替换", "type": "command",
      "cmd": "python3 scripts/blueink.py check-verdict {output} --check contracts"},
-    {"id": "state-layer", "text": "绑定拦截、指令产物隔离、Office 抽取、符号链接跳过、URL 白名单、置信度升降、内容哈希增量、审计定位、附件登记、初稿 handoff 与交付后正文冻结全部通过真实临时目录回归", "type": "command",
+    {"id": "state-layer", "text": "绑定拦截、指令产物隔离、Office 抽取、符号链接跳过、URL 白名单、置信度升降、内容哈希增量、审计定位、附件登记、唯一正文 handoff、核对侧车拆分与交付后正文冻结全部通过真实临时目录回归", "type": "command",
      "cmd": "python3 scripts/test_state.py"},
     {"id": "self-claims", "text": "声明与实际一致：文档里的检查项数、子命令面、边界清单、留存策略、脚本清单双向核对，且 Python 底线在底线版本上真的跑得起来", "type": "command",
      "cmd": "python3 scripts/self_check.py --compat --claims"},

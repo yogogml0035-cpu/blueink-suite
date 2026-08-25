@@ -13,10 +13,10 @@
 
 1. 在 `run.json.decision.needs_evidence` 指名缺什么、为什么会改变稿件。
 2. 知识库检索使用 `retrieve --track fact|style|strategy`；官方 URL 先用 `official check-url`。
-3. 初稿尚未 `handoff` 时，把使用的来源、完整编辑决策和最多 12 条事实原子通过 `save --kind decision` 更新进同一份 `run.json`。
+3. 稿件尚未 `handoff` 时，把使用的来源、完整编辑决策和最多 12 条事实原子通过 `save --kind decision` 更新进同一份 `run.json`。
 4. 来源冲突不静默选边：逐轮只问一个冲突，老师裁决后记录原话和改变的判断。
 
-如果高影响缺口在 `handoff` 后才暴露，不再改写 `draft.md`，只把问题和局部替换建议写入轻量核验 `issues`，交给老师处理。
+如果高影响缺口在 `handoff` 后才暴露，不再改写 `delivery.md`，只把问题和局部替换建议写入轻量核验 `issues`，交给老师处理。
 
 ## 时效
 

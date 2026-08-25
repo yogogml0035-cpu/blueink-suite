@@ -2,7 +2,7 @@
 """运行记录：让"这次走到了哪一步"变成可查的事实。
 
 每次新运行都开一个目录并落 ``run.json``。它同时保存登记信息、逐轮回答、已确认
-方向与实际阶段时间。明确附件的普通生成先保存轻量方向，再交付可修改初稿；只有进入
+方向与实际阶段时间。明确附件的普通生成先保存轻量方向，再交付唯一可修改正文；只有进入
 扩展研究时才补事实原子和完整编辑决策。旧运行的 ``meta.json`` 继续只读兼容。
 
 **这套记账有成本，所以它自带留存期。** 运行目录里躺着访谈原文、素材路径和交付
@@ -28,6 +28,7 @@ import workspace
 ENTRY = "/blueink-suite"
 ENTRY_ALIASES = (ENTRY, "/blueink-suite:blueink-suite")
 MODES = ("生成", "绑定", "学习", "定位")
+CURRENT_SCHEMA_VERSION = 5
 
 # 本次证据边界。``attachments`` 表示老师说了"以附件为准"，先只用附件成稿；
 # ``kb`` 是默认，允许在绑定库内自主检索。它是一条**声明**而不是一道锁——
@@ -52,10 +53,10 @@ STAGE_NAMES = {
     2: "取证",
     3: "编辑策略",
     4: "方向已确认",
-    5: "可修改初稿已交付",
+    5: "可修改稿件已交付",
     6: "高风险句复核",
     7: "条件编辑风险",
-    8: "交付",
+    8: "交付核对卡已生成",
     9: "运行归档",
     10: "反馈归因",
     11: "记忆晋级",
@@ -63,7 +64,13 @@ STAGE_NAMES = {
 
 # 各阶段的产出文件，audit 与 doctor 用它判断运行走到哪、缺了什么
 STAGE_ARTIFACTS = {
-    4: ["program.json"],
+    5: ["delivery.md"],
+    6: ["verify.json"],
+    8: ["delivery-check.md"],
+    10: ["feedback.json"],
+}
+
+SCHEMA_4_STAGE_ARTIFACTS = {
     5: ["draft.md", "draft-a.md"],
     6: ["verify.json", "verify-a.json"],
     8: ["delivery.md"],
@@ -254,7 +261,7 @@ def open_run(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     meta = {
-        "schema_version": 4,
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "run_id": run_id,
         "started_via": started_via,
         "started_at": (when or datetime.now()).isoformat(timespec="seconds"),
@@ -474,7 +481,7 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     )
     if attachment_fast_path:
         facts = []
-        decision = {"path": "attachment-draft-first"}
+        decision = {"path": "attachment-delivery-first"}
     elif not isinstance(facts, list) or len(facts) > 12:
         raise ValueError("facts 必须是数组且最多 12 条")
     if meta.get("mode") == "生成" and not facts and not attachment_fast_path:
@@ -525,6 +532,8 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     meta = load_meta(run_id, start)
     if _meta_path(run_dir).name != "run.json":
         raise ValueError("旧版 meta.json 运行只读兼容，不能写入新版 decision")
+    if meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
+        raise ValueError("旧版运行只读兼容，不能改写方向或正文")
     data = _validate_decision(payload, meta)
     meta.update(data)
     meta["stage"] = 4
@@ -538,37 +547,39 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     return meta
 
 
-def handoff_draft(run_id: str, start=None) -> dict[str, Any]:
-    """登记并返回老师可立即修改的初稿；登记后当前智能体不得覆盖正文。"""
+def handoff_delivery(run_id: str, start=None) -> dict[str, Any]:
+    """登记并返回老师可立即修改的唯一正文；登记后当前智能体不得覆盖。"""
     run_dir = run_dir_for(run_id, start)
     meta = load_meta(run_id, start)
     if str(meta.get("mode") or "") != "生成":
-        raise ValueError("只有生成任务可以交付可修改初稿")
+        raise ValueError("只有生成任务可以交付可修改稿件")
+    if meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
+        raise ValueError("旧版运行只读兼容，不能改写正文或核验结果")
     direction = meta.get("direction")
     if not isinstance(direction, dict) or direction.get("confirmed_by_user") is not True:
-        raise ValueError("方向尚未得到老师确认，不能交付初稿")
-    draft_path = run_dir / "draft.md"
-    if not draft_path.is_file():
-        raise FileNotFoundError(f"缺 {draft_path}")
-    draft = draft_path.read_text(encoding="utf-8").strip()
-    if not draft:
-        raise ValueError("draft.md 为空，不能交付初稿")
+        raise ValueError("方向尚未得到老师确认，不能交付稿件")
+    delivery_path = run_dir / "delivery.md"
+    if not delivery_path.is_file():
+        raise FileNotFoundError(f"缺 {delivery_path}")
+    delivery = delivery_path.read_text(encoding="utf-8").strip()
+    if not delivery:
+        raise ValueError("delivery.md 为空，不能交付稿件")
 
-    current_hash = _sha256(draft_path)
+    current_hash = _sha256(delivery_path)
     metrics = dict(meta.get("metrics") or {})
-    previous_hash = str(metrics.get("draft_sha256") or "")
+    previous_hash = str(metrics.get("delivery_sha256") or "")
     if previous_hash and previous_hash != current_hash:
         raise ValueError(
-            "可修改初稿交给老师后正文发生了变化；当前智能体不得自动覆盖，"
+            "可修改稿件交给老师后正文发生了变化；当前智能体不得自动覆盖，"
             "请只提供核验问题和局部替换建议"
         )
 
     now = datetime.now()
-    if not metrics.get("draft_handoff_at"):
-        metrics["draft_handoff_at"] = now.isoformat(timespec="seconds")
-        metrics["draft_sha256"] = current_hash
-        metrics["open_to_draft_seconds"] = _elapsed_seconds(meta.get("started_at"), now)
-        metrics["direction_to_draft_seconds"] = _elapsed_seconds(
+    if not metrics.get("delivery_handoff_at"):
+        metrics["delivery_handoff_at"] = now.isoformat(timespec="seconds")
+        metrics["delivery_sha256"] = current_hash
+        metrics["open_to_delivery_seconds"] = _elapsed_seconds(meta.get("started_at"), now)
+        metrics["direction_to_delivery_seconds"] = _elapsed_seconds(
             metrics.get("direction_saved_at"), now
         )
     meta["metrics"] = metrics
@@ -578,10 +589,10 @@ def handoff_draft(run_id: str, start=None) -> dict[str, Any]:
     _write_meta(run_dir, meta)
     return {
         "run_id": run_id,
-        "draft_path": str(draft_path),
-        "draft_sha256": current_hash,
-        "draft": draft,
-        "risk_sentences": draft_risk_sentences(draft),
+        "delivery_path": str(delivery_path),
+        "delivery_sha256": current_hash,
+        "delivery": delivery,
+        "risk_sentences": draft_risk_sentences(delivery),
         "metrics": metrics,
     }
 
@@ -599,23 +610,25 @@ def _expected_verdict(payload: dict[str, Any]) -> str:
 def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("verify 输入顶层必须是对象")
-    if not (run_dir / "draft.md").is_file():
-        raise ValueError("缺 draft.md，不能先核验后成稿")
+    if meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
+        raise ValueError("旧版运行只读兼容，不能改写正文或核验结果")
+    if not (run_dir / "delivery.md").is_file():
+        raise ValueError("缺 delivery.md，不能先核验后成稿")
     claims = payload.get("claims")
     sources = payload.get("sources_used")
-    draft = (run_dir / "draft.md").read_text(encoding="utf-8")
-    current_hash = _sha256(run_dir / "draft.md")
-    handed_hash = str((meta.get("metrics") or {}).get("draft_sha256") or "")
+    delivery = (run_dir / "delivery.md").read_text(encoding="utf-8")
+    current_hash = _sha256(run_dir / "delivery.md")
+    handed_hash = str((meta.get("metrics") or {}).get("delivery_sha256") or "")
     if handed_hash and handed_hash != current_hash:
         raise ValueError(
-            "可修改初稿交付后 draft.md 已变化；本轮核验不能冒充当前稿，也不能自动覆盖老师修改"
+            "可修改稿件交付后 delivery.md 已变化；本轮核验不能冒充当前稿，也不能自动覆盖老师修改"
         )
 
     compact_review = claims is None and isinstance(payload.get("issues"), list)
-    risks = draft_risk_sentences(draft)
+    risks = draft_risk_sentences(delivery)
     if compact_review:
         if not handed_hash:
-            raise ValueError("轻量核验前必须先运行 handoff，把可修改初稿交给老师")
+            raise ValueError("轻量核验前必须先运行 handoff，把可修改稿件交给老师")
         risk_by_id = {str(item["id"]): item for item in risks}
         resolved_claims: list[dict[str, Any]] = []
         for index, issue in enumerate(payload.get("issues") or []):
@@ -634,7 +647,7 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
                 if len(matches) == 1:
                     risk = matches[0]
             if risk is None and fragment:
-                matches = [quote for quote in _draft_sentences(draft) if fragment in quote]
+                matches = [quote for quote in _draft_sentences(delivery) if fragment in quote]
                 if len(matches) == 1:
                     risk = {
                         "id": f"R{len(risks) + 1}",
@@ -678,14 +691,14 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
         quote = str(claim.get("quote") or "").strip()
         if not quote:
             raise ValueError(f"claims[{index}] 缺正文 quote")
-        if quote not in draft:
-            raise ValueError(f"claims[{index}].quote 不在 draft.md 中")
+        if quote not in delivery:
+            raise ValueError(f"claims[{index}].quote 不在 delivery.md 中")
         fact_ids = claim.get("fact_ids") or []
         if not isinstance(fact_ids, list) or any(str(fid) not in facts_by_id for fid in fact_ids):
             raise ValueError(f"claims[{index}].fact_ids 含 run.json 中不存在的事实 id")
     if not compact_review:
         for word in STRONG_WORDS:
-            if word not in draft:
+            if word not in delivery:
                 continue
             matches = [claim for claim in claims if word in str(claim.get("quote") or "")]
             if not matches:
@@ -734,7 +747,7 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
         ),
         "review_mode": "issues-only-after-handoff" if compact_review else "claim-map",
         "risk_sentences": risks if compact_review else [],
-        "draft_sha256": current_hash,
+        "delivery_sha256": current_hash,
         "cross_brand": cross_brand,
         "redline_hits": redline_hits,
         "editorial_risks": editorial_risks,
@@ -756,8 +769,8 @@ def save_verify(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     metrics = dict(meta.get("metrics") or {})
     saved = datetime.now()
     metrics["verify_saved_at"] = saved.isoformat(timespec="seconds")
-    metrics["draft_to_verify_seconds"] = _elapsed_seconds(
-        metrics.get("draft_handoff_at"), saved
+    metrics["delivery_to_verify_seconds"] = _elapsed_seconds(
+        metrics.get("delivery_handoff_at"), saved
     )
     meta["metrics"] = metrics
     _write_meta(run_dir, meta)
@@ -772,21 +785,26 @@ def save_payload(run_id: str, kind: str, payload: Any, start=None) -> dict[str, 
     raise ValueError("kind 只能是 decision 或 verify")
 
 
-def build_delivery(run_id: str, start=None) -> Path:
+def build_delivery_check(run_id: str, start=None) -> Path:
     run_dir = run_dir_for(run_id, start)
-    draft_path = run_dir / "draft.md"
+    delivery_path = run_dir / "delivery.md"
     verify_path = run_dir / "verify.json"
-    if not draft_path.is_file():
-        raise FileNotFoundError(f"缺 {draft_path}")
+    if not delivery_path.is_file():
+        raise FileNotFoundError(f"缺 {delivery_path}")
     if not verify_path.is_file():
         raise FileNotFoundError(f"缺 {verify_path}")
+    meta = load_meta(run_id, start)
+    if meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
+        raise ValueError("旧版运行只读兼容，不能生成新版交付核对卡")
     verify = json.loads(verify_path.read_text(encoding="utf-8"))
     if not isinstance(verify, dict) or verify.get("verdict") not in VERDICTS:
         raise ValueError("verify.json 缺合法 verdict")
-    verified_hash = str(verify.get("draft_sha256") or "")
-    if verified_hash and verified_hash != _sha256(draft_path):
+    verified_hash = str(verify.get("delivery_sha256") or "")
+    if not verified_hash:
+        raise ValueError("verify.json 缺 delivery_sha256")
+    if verified_hash != _sha256(delivery_path):
         raise ValueError(
-            "draft.md 在核验后发生了变化；不会用旧核验结论包装老师修改后的正文"
+            "delivery.md 在核验后发生了变化；不会把旧核验结论用于老师修改后的正文"
         )
 
     issues: list[str] = []
@@ -820,21 +838,19 @@ def build_delivery(run_id: str, start=None) -> Path:
         card += "\n" + "\n".join(issues[:5])
     else:
         card += "核心事实均有来源，未发现跨品牌信息和待确认事实。"
-    delivery = (
-        draft_path.read_text(encoding="utf-8").strip()
-        + "\n\n交付前核对卡\n\n"
+    delivery_check = (
+        "# 交付核对卡\n\n结论："
         + card
-        + "\n\n实际来源\n\n"
+        + "\n\n## 实际来源\n\n"
         + "\n".join(source_lines)
         + "\n"
     )
-    target = run_dir / "delivery.md"
-    _atomic_text(target, delivery)
-    meta = load_meta(run_id, start)
+    target = run_dir / "delivery-check.md"
+    _atomic_text(target, delivery_check)
     meta["stage"] = 8
-    meta["stage_name"] = "交付已生成"
+    meta["stage_name"] = STAGE_NAMES[8]
     metrics = dict(meta.get("metrics") or {})
-    metrics["delivery_saved_at"] = datetime.now().isoformat(timespec="seconds")
+    metrics["delivery_check_saved_at"] = datetime.now().isoformat(timespec="seconds")
     meta["metrics"] = metrics
     _write_meta(run_dir, meta)
     return target
@@ -911,15 +927,18 @@ def reached_stage(run_dir: Path) -> int:
     """按产出文件判断这次运行实际走到了哪一步。"""
     present = present_artifacts(run_dir)
     reached = 0
+    schema_version = None
     if "run.json" in present:
         try:
             record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
             reached = int(record.get("stage") or 0) if isinstance(record, dict) else 0
+            schema_version = record.get("schema_version") if isinstance(record, dict) else None
         except (json.JSONDecodeError, OSError, TypeError, ValueError):
             reached = 0
-    for stage in sorted(STAGE_ARTIFACTS):
-        if any(name in present for name in STAGE_ARTIFACTS[stage]):
-            reached = stage
+    artifacts = STAGE_ARTIFACTS if schema_version == CURRENT_SCHEMA_VERSION else SCHEMA_4_STAGE_ARTIFACTS
+    for stage in sorted(artifacts):
+        if any(name in present for name in artifacts[stage]):
+            reached = max(reached, stage)
     return reached
 
 
