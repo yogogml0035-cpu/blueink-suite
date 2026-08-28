@@ -46,9 +46,9 @@ $BLUEINK audit --run <run_id>
 ## 参数索引
 
 - 全局：`--project`、`--json`。
-- `bind`：`--brand`、`--kb`、`--brand-key`、`--official`、`--notes`、`--create`、`--force`。
+- `bind`：`--brand`、`--kb`、`--brand-key`、`--official`、`--layout`、`--notes`、`--create`、`--force`。
 - `index`：`--full`、`--limit`；`check-brand`：`--brand`。
-- `retrieve`：`--query`、`--category`、`--track`、`--limit`、`--since`、`--loose`、`--include-instruction-artifacts`、`--run`。
+- `retrieve`：`--query`、`--category`、`--track`、`--limit`、`--since`、`--loose`、`--under`、`--include-instruction-artifacts`、`--run`。
 - `official`：`--url`；`open`：`--mode`、`--brand`、`--attach`、`--one-off`、`--evidence-boundary`、`--started-via`。
 - `save`：`--run`、`--kind`、`--input`；`handoff`、`close`：`--run`。
 - `purge`：`--keep-days`、`--keep-runs`、`--apply`。

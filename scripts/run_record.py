@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import memory
 import miniyaml
 import workspace
 
@@ -45,7 +46,8 @@ KEEP_RUNS = 20
 RUN_META_FIELDS = (
     "schema_version", "run_id", "started_via", "started_at", "mode", "brand", "brand_key",
     "brand_asked", "kb_root", "bound", "task_attachments", "evidence_boundary",
-    "policy_version", "policy_check", "interview", "direction", "facts", "decision", "metrics",
+    "policy_version", "policy_check", "interview", "direction", "facts", "decision",
+    "memory_reviewed", "metrics",
     "stage", "stage_name", "closed_at", "artifacts",
 )
 
@@ -344,6 +346,9 @@ def open_run(
         "direction": None,
         "facts": [],
         "decision": None,
+        # 与上面几项同一约定：字段在开启运行时就声明，避免"这次到底有没有读记忆"
+        # 靠字段存不存在来推断。None 表示还没走到方向确认。
+        "memory_reviewed": None,
         "metrics": {},
         "stage": 0,
         "stage_name": STAGE_NAMES[0],
@@ -490,8 +495,47 @@ def draft_risk_sentences(draft: str) -> list[dict[str, Any]]:
     return risks
 
 
-def _validate_style_refs(value: Any, meta: dict[str, Any]) -> list[dict[str, str]]:
-    """校验本次真正打开的历史稿件；它们只提供风格，不进入事实来源。"""
+STYLE_REF_SOURCES = {
+    "retrieve": "经 retrieve 检索命中",
+    "attachment": "老师作为附件提供",
+    "direct_read": "未经检索，直接打开",
+}
+
+
+def _retrieved_paths(meta: dict[str, Any], start=None) -> set[str]:
+    """本次运行 ``retrievals.json`` 里真正命中过的相对路径。
+
+    用来核对 ``style_refs`` 里声明 ``source=retrieve`` 的条目是否真有检索背书。
+    读不到就返回空集合——空集合会让声明 retrieve 的条目校验失败，这是刻意的：
+    宁可要求改成 direct_read 说实话，也不要让一句无从核对的声明蒙混过去。
+    """
+    run_id = str(meta.get("run_id") or "")
+    if not run_id:
+        return set()
+    path = workspace.runs_dir(start) / run_id / "retrievals.json"
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    found: set[str] = set()
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        for hit in record.get("hits") or []:
+            if isinstance(hit, dict) and hit.get("path"):
+                found.add(str(hit["path"]))
+    return found
+
+
+def _validate_style_refs(value: Any, meta: dict[str, Any], start=None) -> list[dict[str, str]]:
+    """校验本次真正打开的历史稿件；它们只提供风格，不进入事实来源。
+
+    每条必须声明 ``source``。原来这里只校验路径存在且在绑定根内，于是"经检索取回的"
+    和"智能体自己翻目录写上去的"在运行记录里长得一样——真实运行中出现过第二次生成
+    一次 ``retrieve`` 都没调、却照样登记了两条 style_refs 的情况，事后无从分辨哪份
+    材料真正影响了写作。声明 ``retrieve`` 的条目会与本次 ``retrievals.json`` 的命中
+    交叉核对；直接打开允许，但必须标成 ``direct_read`` 并会出现在交付核对卡里。
+    """
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > 3:
@@ -500,6 +544,7 @@ def _validate_style_refs(value: Any, meta: dict[str, Any]) -> list[dict[str, str
     if value and not kb_root:
         raise ValueError("未绑定品牌知识库时不能登记历史风格参考")
     root = Path(kb_root).expanduser().resolve() if kb_root else None
+    retrieved = _retrieved_paths(meta, start) if value else set()
     refs: list[dict[str, str]] = []
     seen: set[str] = set()
     for index, item in enumerate(value):
@@ -509,6 +554,13 @@ def _validate_style_refs(value: Any, meta: dict[str, Any]) -> list[dict[str, str
         why = str(item.get("why") or "").strip()
         if not raw or not why:
             raise ValueError(f"style_refs[{index}] 必须包含 path 和 why")
+        source = str(item.get("source") or "").strip()
+        if source not in STYLE_REF_SOURCES:
+            raise ValueError(
+                f"style_refs[{index}] 必须声明 source，可选："
+                + "、".join(f"{k}（{v}）" for k, v in STYLE_REF_SOURCES.items())
+                + "。经检索取回的和自己翻目录打开的必须能分辨"
+            )
         try:
             path = Path(raw).expanduser()
             resolved = ((root / path) if root is not None and not path.is_absolute() else path).resolve()
@@ -516,20 +568,98 @@ def _validate_style_refs(value: Any, meta: dict[str, Any]) -> list[dict[str, str
             raise ValueError(f"style_refs[{index}].path 无法解析：{raw}（{exc}）") from exc
         if root is None or not resolved.is_file() or not workspace.within(resolved, root):
             raise ValueError(f"style_refs[{index}].path 不存在或越过绑定知识库：{raw}")
+        rel = resolved.relative_to(root).as_posix()
+        if source == "retrieve" and rel not in retrieved:
+            raise ValueError(
+                f"style_refs[{index}] 声明 source=retrieve，但本次 retrievals.json 里"
+                f"没有命中过「{rel}」。先用 retrieve（老师点名目录时加 --under）真正取一次，"
+                f"或把它改成 direct_read 如实登记"
+            )
         key = str(resolved)
         if key in seen:
             continue
         seen.add(key)
         caveat = str(item.get("caveat") or "").strip() or "只参考表达，不作为事实来源"
         refs.append({
-            "path": resolved.relative_to(root).as_posix(),
+            "path": rel,
             "why": why,
             "caveat": caveat,
+            "source": source,
         })
     return refs
 
 
-def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
+def _validate_memory_reviewed(value: Any, meta: dict[str, Any], start=None) -> dict[str, Any]:
+    """校验本次生成确实过目了条件化记忆。
+
+    写入端一直在攒候选、读取端不存在，反馈永远影响不到下一次成稿。光在 generate.md
+    写一句"要读"是不够的——``style_refs`` 的教训就是没有校验的指令会被静默跳过。
+    这里要求方向记录里如实交代：过目了几条、采用了哪些、哪些当次不适用、哪些被老师
+    取消。高置信项按 ``memory`` 自己声明的用法契约必须逐条交代（"可自动进入本次写作
+    程序，但必须在决策卡中可见、可取消"）；中置信项只作推荐，不强制逐条写理由，
+    但总数必须与记忆库一致——数字对不上就说明这次根本没读。
+    """
+    brand = str(meta.get("brand") or "")
+    try:
+        available = memory.for_generation(brand, start=start)
+    except memory.MemoryError_ as exc:
+        # 记忆库损坏不该把成稿卡死；doctor 会报出来。
+        return {"considered": 0, "applied": [], "not_applicable": [], "cancelled": [],
+                "store_error": str(exc)}
+    usable = available["items"]
+    must_show = set(available["must_show"])
+    if not usable:
+        return {"considered": 0, "applied": [], "not_applicable": [], "cancelled": []}
+    if value is None:
+        raise ValueError(
+            f"记忆库里有 {len(usable)} 条可用于本次写作的条件化记忆，decision 必须包含 "
+            f"memory_reviewed，如实交代过目结果。先跑 memory list --for-generation 取回它们；"
+            f"一条都不适用也要写出来，不能当作不存在"
+        )
+    if not isinstance(value, dict):
+        raise ValueError("decision.memory_reviewed 必须是对象")
+    known = {item["id"] for item in usable}
+    out: dict[str, Any] = {"considered": len(usable)}
+    seen: set[str] = set()
+    for field in ("applied", "not_applicable", "cancelled"):
+        entries = value.get(field) or []
+        if not isinstance(entries, list):
+            raise ValueError(f"memory_reviewed.{field} 必须是数组")
+        cleaned: list[dict[str, str]] = []
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ValueError(f"memory_reviewed.{field}[{index}] 必须是对象")
+            memory_id = str(entry.get("id") or "").strip()
+            if memory_id not in known:
+                raise ValueError(
+                    f"memory_reviewed.{field}[{index}] 的 id「{memory_id}」不在本次可用记忆里"
+                )
+            if memory_id in seen:
+                raise ValueError(f"记忆 {memory_id} 在 memory_reviewed 里出现了多次")
+            seen.add(memory_id)
+            reason = str(entry.get("how") or entry.get("why") or "").strip()
+            if not reason:
+                raise ValueError(
+                    f"memory_reviewed.{field}[{index}] 要写 how（怎么用的）或 why（为什么不适用）"
+                )
+            cleaned.append({"id": memory_id, "reason": reason})
+        out[field] = cleaned
+    declared = int(value.get("considered") or 0)
+    if declared != len(usable):
+        raise ValueError(
+            f"memory_reviewed.considered 写的是 {declared}，记忆库当前有 {len(usable)} 条可用记忆。"
+            f"数字对不上说明读到的不是当前记忆库，重新取一次"
+        )
+    unaccounted = must_show - seen
+    if unaccounted:
+        raise ValueError(
+            f"高置信记忆必须在决策卡里可见且可取消，这几条没有交代："
+            f"{'、'.join(sorted(unaccounted))}"
+        )
+    return out
+
+
+def _validate_decision(payload: Any, meta: dict[str, Any], start=None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("decision 输入顶层必须是对象")
 
@@ -537,7 +667,9 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     direction = payload.get("direction")
     facts = payload.get("facts")
     decision = payload.get("decision")
-    style_refs = _validate_style_refs(payload.get("style_refs"), meta)
+    style_refs = _validate_style_refs(payload.get("style_refs"), meta, start)
+    memory_reviewed = _validate_memory_reviewed(
+        payload.get("memory_reviewed"), meta, start)
     if not isinstance(interview, dict) or not isinstance(interview.get("rounds"), list):
         raise ValueError("decision.interview.rounds 必须是数组")
     rounds = interview["rounds"]
@@ -636,6 +768,7 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
         "direction": direction,
         "facts": facts,
         "decision": decision,
+        "memory_reviewed": memory_reviewed,
     }
 
 
@@ -646,7 +779,7 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
         raise ValueError("旧版 meta.json 运行只读兼容，不能写入新版 decision")
     if meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
         raise ValueError("旧版运行只读兼容，不能改写方向或正文")
-    data = _validate_decision(payload, meta)
+    data = _validate_decision(payload, meta, start)
     meta.update(data)
     meta["stage"] = 4
     meta["stage_name"] = "方向已确认"
@@ -656,6 +789,25 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     metrics["decision_saved_at"] = metrics["direction_saved_at"]
     meta["metrics"] = metrics
     _write_meta(run_dir, meta)
+    # 标记这些记忆在本次运行里被过目：只刷新 last_hit / updated，不动置信度。
+    # 在读取端接通之前任何记忆都不可能被命中，decay 的"长期未命中才衰减"因此形同
+    # 必然扣分；标记之后这条规则才回到它本来的意思。写盘失败不该回滚已保存的方向。
+    reviewed = meta.get("memory_reviewed") or {}
+    touched = [entry["id"]
+               for field in ("applied", "not_applicable", "cancelled")
+               for entry in (reviewed.get(field) or [])
+               if isinstance(entry, dict) and entry.get("id")]
+    if touched:
+        try:
+            memory.mark_hit(touched, run_id=run_id, start=start)
+        except memory.MemoryError_:
+            pass
+    # 老师在决策卡里取消掉的项按记忆库自己的语义扣分，这是证据不是用量。
+    for entry in reviewed.get("cancelled") or []:
+        try:
+            memory.cancelled(str(entry["id"]), run_id=run_id, start=start)
+        except (memory.MemoryError_, KeyError, TypeError):
+            pass
     return meta
 
 
@@ -1065,6 +1217,7 @@ def build_delivery_check(run_id: str, start=None) -> Path:
         source_lines.append(f"- {kind}：{label}" + (f"（{date}）" if date else ""))
 
     style_lines: list[str] = []
+    unverified = 0
     decision = meta.get("decision")
     if isinstance(decision, dict):
         for item in decision.get("style_refs") or []:
@@ -1073,7 +1226,17 @@ def build_delivery_check(run_id: str, start=None) -> Path:
             label = Path(str(item.get("path") or "")).name
             why = str(item.get("why") or "历史稿件")
             caveat = str(item.get("caveat") or "只参考表达，不作为事实来源")
-            style_lines.append(f"- {label}：{why}；{caveat}")
+            source = str(item.get("source") or "")
+            if source and source != "retrieve":
+                unverified += 1
+            tag = STYLE_REF_SOURCES.get(source, "来源未登记")
+            style_lines.append(f"- {label}（{tag}）：{why}；{caveat}")
+    if style_lines and unverified:
+        # 让老师看见"这几篇是智能体自己翻出来的，没有检索背书"，而不是只在
+        # run.json 里留一个字段。看得见才可能被质疑。
+        style_lines.append(
+            f"- ⚠ 其中 {unverified} 篇未经检索登记：无法核对它是否真的是同品牌同品类的可用参考。"
+        )
 
     card = f"{verify['verdict']}。"
     if issues:

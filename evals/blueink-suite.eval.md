@@ -49,7 +49,7 @@ python3 scripts/blueink.py audit --input <运行记录目录> --output <结论.j
 状态层和自证门是独立发布门，不对每个 golden 重复执行：
 
 ```bash
-python3 scripts/test_state.py                       # 当前状态层集成回归，204 项
+python3 scripts/test_state.py                       # 当前状态层集成回归，275 项
 python3 scripts/self_check.py --compat --claims     # 版本、声明、夹具统计和边界一致性
 python3 scripts/self_check.py --mutation            # 已知失败形态必须转红
 python3 scripts/check_pipeline.py .                 # 脚本接线与依赖

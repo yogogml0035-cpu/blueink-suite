@@ -8,6 +8,10 @@
 - ``style``    只返回终稿与成品参考，排除初稿和对照文件
 - ``strategy`` 只返回初终稿对比、经验总结与反馈
 
+老师在需求里点名了参考目录时用 ``--under`` 限定：这是本次信息量最大的一条指令，
+优先于系统按品类推断。点名只解除"哪些文件算风格样本"这个由系统猜的门槛，不解除
+绑定根边界，也不解除初稿与对照稿的排除。
+
 检索永远限制在绑定的知识库之内——因为它只从索引里查，而索引只包含 kb_root 下
 的文件。这不是一条需要反复申明的规则，而是实现方式。
 
@@ -96,7 +100,44 @@ def _term_score(record: dict[str, Any], terms: list[tuple[str, float]]) -> tuple
     return score, why[:4]
 
 
-def _track_adjust(record: dict[str, Any], track: str | None) -> float | None:
+def _under_prefix(under: str | None, kb_root: Path) -> str | None:
+    """把 ``--under`` 归一成相对绑定根的 posix 前缀。
+
+    老师在需求里点名目录（「参考知识库里的【媒体深度稿件】文件夹」）是本次信息量
+    最大的一条指令，但检索原来没有任何参数能表达它，只能绕过 retrieve 裸读目录，
+    于是 ``retrievals.json`` 记下的和真正影响写作的材料不是一回事。
+
+    接受相对绑定根的子路径，也接受绑定根内的绝对路径（含 Windows 反斜杠写法）；
+    越出绑定根或带 ``..`` 逃逸时拒绝——绑定根这条边界不因老师点名而松开。
+    """
+    if not under:
+        return None
+    raw = str(under).strip().strip('"').replace("\\", "/")
+    # 分两行写：security_scan 的 KB_WRITE 规则会把绑定根变量与同一行里的字符串
+    # 替换调用一起认成对源知识库的改名写操作。这里只做路径归一，拆开避免误报。
+    root_text = str(kb_root)
+    root_norm = root_text.replace("\\", "/").rstrip("/")
+    if raw.lower().startswith(root_norm.lower() + "/"):
+        raw = raw[len(root_norm) + 1:]
+    elif Path(raw).is_absolute():
+        raise workspace.WorkspaceError(
+            f"--under 必须落在绑定的知识库内：{under}\n"
+            f"（当前绑定根：{kb_root}；根外材料按附件登记，不自主翻找）"
+        )
+    prefix = raw.strip("/")
+    if not prefix or ".." in prefix.split("/"):
+        raise workspace.WorkspaceError(f"--under 不接受空路径或 .. 逃逸：{under}")
+    return prefix
+
+
+def _under_match(rel: str, prefix: str) -> bool:
+    """记录是否落在 ``--under`` 指定的子树内。大小写不敏感，迁就 Windows 路径。"""
+    low, pre = rel.lower(), prefix.lower()
+    return low == pre or low.startswith(pre + "/")
+
+
+def _track_adjust(record: dict[str, Any], track: str | None,
+                  explicit_path: bool = False) -> float | None:
     """按轨调整得分。返回 ``None`` 表示该轨不接受这条记录。"""
     evidence = set(record.get("evidence_type") or [])
     stage = record.get("stage") or "未知"
@@ -109,6 +150,11 @@ def _track_adjust(record: dict[str, Any], track: str | None) -> float | None:
             return 3.0
         if evidence & TRACK_ALLOWED_EVIDENCE["style"]:
             return 2.0
+        # 老师点名了目录时，"哪些文件算风格样本"已经由老师回答，不再要求文件自身
+        # 带终稿或成品参考标记——那两条是系统自己猜的门槛。上面的初稿、对照稿
+        # 排除仍然生效，点名不解除它。
+        if explicit_path:
+            return 1.5
         return None
 
     if track == "strategy":
@@ -140,6 +186,53 @@ def _recency(record: dict[str, Any], since: str | None) -> tuple[float, bool]:
     return max(0.0, (year - 2023) * 0.5), True
 
 
+def is_style_sample(record: dict[str, Any]) -> bool:
+    """style 轨是否接受这条记录。
+
+    判定的唯一来源就是 ``_track_adjust``——这里只是薄适配，不另写一份条件，
+    否则改了 style 轨的收录条件就会出现两份互相漂移的判断。
+    ``explicit_path`` 取默认 ``False``：可达性问的是"老师没点名路径时"那条路。
+
+    这个谓词属于检索层而不是索引层。索引只记录观察到的属性（stage、
+    evidence_type、categories），不记录"够不够资格当风格样本"这类裁决——
+    把裁决烧进索引会让每次改策略都要全量重建索引，而且落盘的结论会陈旧。
+    """
+    return _track_adjust(record, "style") is not None
+
+
+def style_reach(start=None, index: dict[str, Any] | None = None) -> dict[str, Any]:
+    """按品类逐个问「style 轨取不取得到东西」，用于建索引和排障时报告可达性。
+
+    不复述任何过滤条件：直接调用 ``search``，所以轨道过滤、品类匹配、
+    ``instruction_artifact`` 排除和 ``score > 0`` 判定全部与真实检索一致。
+    ``generate.md`` 规定的调用形态是 ``--track style --category <品类>``，
+    这里就照它问，改了也自动跟着改。
+
+    ``index`` 可以传已在内存里的索引（例如刚 build 完的），省掉重复读盘。
+    """
+    idx = index if index is not None else index_kb.load_index(start)
+    records = idx.get("files") or []
+    reachable: list[tuple[str, int]] = []
+    unreachable: list[str] = []
+    for category in index_kb.known_categories():
+        found = search(track="style", category=category, limit=1,
+                       start=start, index=idx)
+        count = found.get("candidates_total") or 0
+        if count:
+            reachable.append((category, count))
+        else:
+            unreachable.append(category)
+    return {
+        "categories": len(index_kb.known_categories()),
+        "reachable": reachable,
+        "unreachable": unreachable,
+        "style_samples": sum(
+            1 for r in records
+            if is_style_sample(r) and not r.get("instruction_artifact")
+        ),
+    }
+
+
 def search(
     query: str = "",
     *,
@@ -148,13 +241,18 @@ def search(
     limit: int = 12,
     since: str | None = None,
     loose: bool = False,
+    under: str | None = None,
     include_instruction_artifacts: bool = False,
+    index: dict[str, Any] | None = None,
     start=None,
 ) -> dict[str, Any]:
-    """在索引里检索候选证据切片。"""
+    """在索引里检索候选证据切片。
+
+    ``index`` 传入已在内存里的索引时不再读盘；不传时行为与以前完全一致。
+    """
     ws = workspace.load(start)
     current_root = workspace.kb_root(start)
-    index = index_kb.load_index(start)
+    index = index if index is not None else index_kb.load_index(start)
     files = index.get("files") or []
     if files:
         index_root = Path(str(index.get("kb_root") or "")).expanduser().resolve()
@@ -178,8 +276,43 @@ def search(
         }
 
     terms = _terms(query)
+    # 品类名只认规范标签。认不出就**当场停下**，不猜、也不退化成无品类检索。
+    # 原来"名字没认出"和"这个品类确实没素材"长得一样（都是 candidates_total 0），
+    # 谁都分不清，于是没人知道要去问。这里把它变成显式结果并交出封闭词表，由智能体
+    # 做语义映射后重新调用。脚本不做语义：靠扩充别名去认「供稿」「财报稿」这类说法
+    # 永远列不全，而且会把找不到变成找错（「文案」会被字面认成「社会化文案」）。
+    category_unresolved: str | None = None
+    if category and category not in index_kb.known_categories():
+        category_unresolved, category = category, None
+        if not under:
+            return {
+                "brand": index.get("brand"),
+                "kb_root": index.get("kb_root"),
+                "query": query,
+                "category": None,
+                "category_unresolved": category_unresolved,
+                "known_categories": list(index_kb.known_categories()),
+                "under": None,
+                "under_pool": None,
+                "track": track,
+                "limit": limit,
+                "candidates_total": 0,
+                "excluded_instruction_artifacts": 0,
+                "hits": [],
+                "note": (
+                    f"品类名「{category_unresolved}」不是索引使用的规范标签，没有执行检索——"
+                    f"不猜也不放宽。规范标签只有这些："
+                    f"{'、'.join(index_kb.known_categories())}。"
+                    f"按本次任务选一个再调一次，并在方向记录里写下选了哪个；"
+                    f"确实判断不了就问老师一个问题。老师点名了目录就改用 --under。"
+                ),
+            }
+        # 同时给了 --under：老师点名的路径优先于系统按品类推断，所以不因为品类名
+        # 认不出就把这次检索废掉。丢掉认不出的品类，按路径继续，并在 note 里说明。
+    under_prefix = _under_prefix(under, current_root)
     scored: list[tuple[float, dict[str, Any], list[str]]] = []
     excluded_instruction = 0
+    under_pool = 0
 
     for record in files:
         # 混进来的技能包默认不参与检索。它们是提示词和固定模板，被当成经验
@@ -187,7 +320,11 @@ def search(
         if record.get("instruction_artifact") and not include_instruction_artifacts:
             excluded_instruction += 1
             continue
-        adjust = _track_adjust(record, track)
+        if under_prefix:
+            if not _under_match(str(record.get("path") or ""), under_prefix):
+                continue
+            under_pool += 1
+        adjust = _track_adjust(record, track, explicit_path=bool(under_prefix))
         if adjust is None:
             continue
         recency_bonus, date_ok = _recency(record, since)
@@ -209,6 +346,9 @@ def search(
                 why.append(f"候选品类含「{category}」")
             elif not loose:
                 continue
+
+        if under_prefix:
+            why.append(f"老师点名路径「{under_prefix}」")
 
         if not terms and not category:
             score += 1.0  # 无查询词时按轨与时间排序
@@ -241,17 +381,38 @@ def search(
         for score, record, why in scored[:limit]
     ]
 
+    if hits:
+        note = ("" if not category_unresolved else
+                f"已按老师点名的「{under_prefix}」取材；品类名「{category_unresolved}」"
+                f"不是规范标签，本次未按品类过滤。")
+    elif under_prefix and not under_pool:
+        note = (f"「{under_prefix}」在索引里没有任何文件：确认老师给的路径拼写，"
+                f"或先跑 index 重建索引。不要改成翻别的目录。")
+    elif under_prefix:
+        note = (f"「{under_prefix}」下的 {under_pool} 个文件都不是可用风格样本"
+                f"（初稿与对照稿不算）。向老师确认该目录，不要自行换目录。")
+    else:
+        # 原来这里建议「去掉 --track」。track 为空时 _track_adjust 返回 0.0，
+        # 排除初稿与对照稿的守卫就整条失效，候选池等于放开整库——而 generate.md
+        # 明令不为凑数放宽到初稿、对照稿或历史 Skill。不能再这样建议。
+        note = ("没有命中。老师点名了目录就用 --under 限定；否则确认品类名或用 --query "
+                "补关键词。不要去掉 --track，也不要放宽到初稿、对照稿。仍为空时跑 doctor。")
+
     return {
         "brand": index.get("brand"),
         "kb_root": index.get("kb_root"),
         "query": query,
         "category": category,
+        "category_unresolved": category_unresolved,
+        "known_categories": list(index_kb.known_categories()),
+        "under": under_prefix,
+        "under_pool": under_pool if under_prefix else None,
         "track": track,
         "limit": limit,
         "candidates_total": len(scored),
         "excluded_instruction_artifacts": excluded_instruction,
         "hits": hits,
-        "note": "" if hits else "没有命中。放宽 --category 或去掉 --track 再试；仍为空时先跑 doctor。",
+        "note": note,
     }
 
 

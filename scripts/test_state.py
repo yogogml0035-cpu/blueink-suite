@@ -102,6 +102,10 @@ def build_kb(root: Path) -> None:
     (root / "05-成品参考" / "新闻稿参考.md").write_text(
         "# 新闻稿参考\n交付数据与平台技术支撑。\n", encoding="utf-8"
     )
+    # 文件名同时像两个品类：不该在任何一个品类里当主项，只能作候选降权命中
+    (root / "05-成品参考" / "新闻稿撰稿指引.md").write_text(
+        "# 撰稿指引\n给媒体的取用口径与结构建议。\n", encoding="utf-8"
+    )
     # 老师手写的经验总结：必须仍然可检索
     (root / "04-经验总结原稿" / "客户对接经验.md").write_text(
         "# 对接经验\n传播红线：不拉踩竞品。新闻稿结构不强制铺垫行业背景。\n", encoding="utf-8"
@@ -219,8 +223,48 @@ def test_bind(tmp: Path, kb: Path) -> Path:
     }
     check("绑定命令只暴露当前产品参数", bind_flags == {
         "-h", "--help", "--project", "--json", "--brand", "--kb", "--brand-key",
-        "--official", "--notes", "--create", "--force",
+        "--official", "--layout", "--notes", "--create", "--force",
     }, str(sorted(bind_flags)))
+
+    # --layout：老师声明语料布局的入口。不传时必须返回 None 交给 bind 保留原布局，
+    # 返回 {} 会把上次声明清空。
+    check("不传 --layout 时返回 None 而不是空字典",
+          blueink_cli._parse_layout(None) is None and blueink_cli._parse_layout([]) is None)
+    check("--layout 正常解析并去掉多余斜杠",
+          blueink_cli._parse_layout(["成品参考=/媒体深度稿件/"]) == {"成品参考": "媒体深度稿件"},
+          str(blueink_cli._parse_layout(["成品参考=/媒体深度稿件/"])))
+    check("--layout 可声明多个标签",
+          blueink_cli._parse_layout(["成品参考=A", "原文资产=B"]) == {"成品参考": "A", "原文资产": "B"})
+    check("同一标签可对多个目录：逗号分隔",
+          index_kb.layout_folders(blueink_cli._parse_layout(["成品参考=媒体深度稿件,新闻稿"])["成品参考"])
+          == ["媒体深度稿件", "新闻稿"])
+    check("同一标签可对多个目录：重复传参累加且去重",
+          index_kb.layout_folders(blueink_cli._parse_layout(
+              ["成品参考=媒体深度稿件", "成品参考=新闻稿", "成品参考=媒体深度稿件"])["成品参考"])
+          == ["媒体深度稿件", "新闻稿"])
+    check("旧的单目录写法继续有效", index_kb.layout_folders("05-成品参考") == ["05-成品参考"])
+    expect_raises("--layout 拒绝未知标签", workspace.WorkspaceError,
+                  blueink_cli._parse_layout, ["随便写=A"])
+    expect_raises("--layout 拒绝缺少等号", workspace.WorkspaceError,
+                  blueink_cli._parse_layout, ["成品参考"])
+    expect_raises("--layout 拒绝 .. 逃逸", workspace.WorkspaceError,
+                  blueink_cli._parse_layout, ["成品参考=../外面"])
+
+    # 目录声明按路径段匹配。裸子串会把写作规范和别的目录的资产误标成范例。
+    check("多目录声明都能命中",
+          index_kb._classify_evidence("x", {"成品参考": "媒体深度稿件,新闻稿"},
+                                      "新闻稿/2026年/【新闻稿】上市.md") == (["成品参考"], 0.85)
+          and index_kb._classify_evidence("x", {"成品参考": "媒体深度稿件,新闻稿"},
+                                          "媒体深度稿件/【优质供稿】a.md") == (["成品参考"], 0.85))
+    check("段匹配：文件名含目录名不算命中",
+          index_kb._classify_evidence("x", {"成品参考": "新闻稿"},
+                                      "wiki/写作参考/新闻稿写作规范.md") != (["成品参考"], 0.85))
+    check("段匹配：别的目录下的同名文件不算命中",
+          index_kb._classify_evidence("x", {"成品参考": "新闻稿"},
+                                      "理想汽车财报资料/2026年/【新闻稿】财报.md") != (["成品参考"], 0.85))
+    check("段匹配：顶层与嵌套目录都支持",
+          index_kb._layout_match("a/b/成品参考/x.md", "成品参考")
+          and index_kb._layout_match("05-成品参考/x.md", "05-成品参考"))
     return project
 
 
@@ -254,6 +298,57 @@ def test_index_and_retrieve(project: Path) -> None:
     # 阶段判定：文件名优先于目录名
     check("终稿被判为终稿", by_path["03-初终稿对比/【终稿】上市稿.md"]["stage"] == "终稿")
     check("初稿被判为初稿", by_path["03-初终稿对比/【初稿】上市稿.md"]["stage"] == "初稿")
+
+    # ---- 命中多个品类时不强行归类：只作候选，让检索侧的降权通道真正可达 ----
+    check("单命中仍然设主品类",
+          index_kb._classify_categories("【新闻稿】上市.md", "x/【新闻稿】上市.md", "")
+          == (["新闻稿"], ["新闻稿"], 0.75))
+    multi = index_kb._classify_categories("新闻稿撰稿指引.md", "x/新闻稿撰稿指引.md", "")
+    check("多命中不设主品类，全部放进候选",
+          multi[0] == [] and multi[1] == ["新闻稿", "媒体传播指引"], str(multi))
+    check("一个都没命中时主项与候选都空",
+          index_kb._classify_categories("随便.md", "x/随便.md", "") == ([], [], 0.1))
+    for rec in result["files"]:
+        cats, cands = rec.get("categories") or [], rec.get("candidates") or []
+        check_silent = len(cats) <= 1 and (not cats or cats == cands[:1])
+        if not check_silent:
+            check(f"主品类最多一个且来自候选：{rec['path']}", False, f"{cats} / {cands}")
+    check("索引里不再出现多个主品类",
+          all(len(r.get("categories") or []) <= 1 for r in result["files"]))
+    check("未归类只统计一个品类都没命中的文件",
+          stats["uncategorized"] == sum(
+              1 for r in result["files"]
+              if not r.get("categories") and not r.get("candidates")
+              and not r.get("instruction_artifact")))
+    check("命中多个未定主项单独计数",
+          stats["multi_category"] == sum(
+              1 for r in result["files"]
+              if not r.get("categories") and len(r.get("candidates") or []) > 1
+              and not r.get("instruction_artifact")))
+
+    # 降权通道端到端可达：这条分支原来永远走不到，因为没有数据只在候选里
+    guide = by_path["05-成品参考/新闻稿撰稿指引.md"]
+    check("多品类文件在索引里没有主品类",
+          guide["categories"] == [] and guide["candidates"] == ["新闻稿", "媒体传播指引"],
+          f"{guide['categories']} / {guide['candidates']}")
+    primary = by_path["05-成品参考/新闻稿参考.md"]
+    check("单品类文件仍有主品类", primary["categories"] == ["新闻稿"])
+    found = retrieve_mod.search(track="style", category="新闻稿", limit=10, start=project)
+    by_hit = {h["path"]: h for h in found["hits"]}
+    check("多品类文件仍能被按品类检索到（走候选通道）",
+          "05-成品参考/新闻稿撰稿指引.md" in by_hit,
+          str(list(by_hit)))
+    check("候选通道命中带降权说明",
+          any("候选品类含" in w for w in by_hit["05-成品参考/新闻稿撰稿指引.md"]["why"]),
+          str(by_hit["05-成品参考/新闻稿撰稿指引.md"]["why"]))
+    check("主品类命中说明与候选命中说明不同",
+          any("品类命中" in w for w in by_hit["05-成品参考/新闻稿参考.md"]["why"]),
+          str(by_hit["05-成品参考/新闻稿参考.md"]["why"]))
+    check("同品类主项排在候选之前",
+          by_hit["05-成品参考/新闻稿参考.md"]["score"]
+          > by_hit["05-成品参考/新闻稿撰稿指引.md"]["score"],
+          f"{by_hit['05-成品参考/新闻稿参考.md']['score']} vs "
+          f"{by_hit['05-成品参考/新闻稿撰稿指引.md']['score']}")
 
     # 增量：第二次全部复用
     again = index_kb.build(start=project)
@@ -298,6 +393,89 @@ def test_index_and_retrieve(project: Path) -> None:
     paths = [h["path"] for h in hit["hits"]]
     check("检索默认不返回历史技能模板", tpl not in paths, str(paths))
     check("排除计数被报出来", hit["excluded_instruction_artifacts"] >= 2, str(hit))
+
+    # ---- 风格样本的判定只能有一处定义 ----
+    # "什么算风格样本"是检索策略，不是索引事实。索引只记观察到的属性；一旦索引也
+    # 下这个裁决，就会出现两份互相漂移的判断，而且落盘的结论会在策略变更后变陈旧。
+    # 这几条把这个分层钉死。
+    reloaded = index_kb.load_index(project)
+    check("索引不下检索裁决：没有风格样本谓词",
+          not any(hasattr(index_kb, n) for n in ("_is_style_sample", "is_style_sample")),
+          "风格样本的判定必须留在 retrieve，索引只记 stage / evidence_type / categories")
+    check("索引不落盘派生的可达性统计",
+          not {"style_samples", "style_by_category"} & set(reloaded["stats"]),
+          str(sorted(reloaded["stats"])))
+    check("is_style_sample 与 _track_adjust 完全一致",
+          all(retrieve_mod.is_style_sample(rec)
+              == (retrieve_mod._track_adjust(rec, "style") is not None)
+              for rec in reloaded["files"]),
+          "谓词必须是 _track_adjust 的薄适配，不能另写一份条件")
+    check("初稿与对照稿不算风格样本，终稿算",
+          not retrieve_mod.is_style_sample(by_path["03-初终稿对比/【初稿】上市稿.md"])
+          and retrieve_mod.is_style_sample(by_path["03-初终稿对比/【终稿】上市稿.md"]))
+
+    # 注入索引不改变行为：style_reach 靠它省掉重复读盘
+    for args in ({"track": "style", "limit": 5},
+                 {"track": "fact", "query": "交付", "limit": 5},
+                 {"track": "style", "category": "新闻稿", "limit": 3}):
+        q = dict(args); q.setdefault("query", "")
+        a = retrieve_mod.search(q.pop("query"), start=project, **q)
+        q2 = dict(args); q2.setdefault("query", "")
+        b = retrieve_mod.search(q2.pop("query"), start=project, index=reloaded, **q2)
+        check(f"注入索引与读盘结果一致（{args}）",
+              a["hits"] == b["hits"] and a["candidates_total"] == b["candidates_total"])
+
+    # style_reach 必须与真正跑一遍 search 的结果一致，不能走捷径自己算
+    reach = retrieve_mod.style_reach(start=project)
+    check("可达性覆盖全部规范品类", reach["categories"] == len(index_kb.CATEGORY_RULES))
+    check("可达/不可达两组无交集且并集为全部品类",
+          {c for c, _ in reach["reachable"]}.isdisjoint(reach["unreachable"])
+          and {c for c, _ in reach["reachable"]} | set(reach["unreachable"])
+          == set(index_kb.CATEGORY_RULES))
+    for cat, count in reach["reachable"]:
+        actual = retrieve_mod.search(track="style", category=cat, limit=1, start=project)
+        check(f"可达品类{cat}的计数等于真实检索", actual["candidates_total"] == count,
+              f"{actual['candidates_total']} != {count}")
+    for cat in reach["unreachable"]:
+        actual = retrieve_mod.search(track="style", category=cat, limit=1, start=project)
+        check(f"不可达品类{cat}真实检索也是空", actual["candidates_total"] == 0,
+              str(actual["candidates_total"]))
+    check("风格样本计数排除指令产物",
+          reach["style_samples"] == sum(
+              1 for rec in reloaded["files"]
+              if retrieve_mod.is_style_sample(rec) and not rec.get("instruction_artifact")),
+          str(reach["style_samples"]))
+
+    # ---- 品类名只认规范标签：认不出就停下并交出封闭词表，不猜、不退化 ----
+    check("品类词表只有一个出口，且就是 CATEGORY_RULES 的键",
+          index_kb.known_categories() == tuple(index_kb.CATEGORY_RULES))
+    check("可达性遍历用的就是这个词表",
+          reach["categories"] == len(index_kb.known_categories()))
+    canonical = retrieve_mod.search(track="style", category="新闻稿", limit=3, start=project)
+    check("规范标签正常检索，不产生未解析标记",
+          canonical["category"] == "新闻稿" and canonical["category_unresolved"] is None)
+    for spoken in ("供稿", "财报稿", "文案", "媒体供稿", "串词"):
+        vague = retrieve_mod.search(track="style", category=spoken, limit=3, start=project)
+        check(f"「{spoken}」不被脚本猜成任何品类",
+              vague["category"] is None and vague["category_unresolved"] == spoken
+              and vague["hits"] == [] and vague["candidates_total"] == 0,
+              f"{vague.get('category')} / {vague.get('category_unresolved')}")
+        check(f"「{spoken}」的回执交出封闭词表",
+              vague["known_categories"] == list(index_kb.known_categories())
+              and all(c in vague["note"] for c in index_kb.known_categories()),
+              str(vague.get("note"))[:120])
+    check("认不出品类时没有退化成无品类检索",
+          retrieve_mod.search(track="style", category="供稿", limit=99, start=project)["hits"]
+          != retrieve_mod.search(track="style", limit=99, start=project)["hits"])
+    # 老师点名了路径时，路径优先：不因为品类名认不出就把这次检索废掉
+    both = retrieve_mod.search(track="style", category="供稿",
+                               under="03-初终稿对比", limit=5, start=project)
+    check("认不出的品类 + 老师点名路径：按路径继续，品类被丢弃",
+          both["under"] == "03-初终稿对比" and both["category"] is None
+          and both["category_unresolved"] == "供稿" and both["hits"],
+          f"under={both.get('under')} hits={len(both.get('hits') or [])}")
+    check("这种情况会在回执里说明品类未生效",
+          "未按品类过滤" in (both["note"] or ""), str(both.get("note")))
     opened = retrieve_mod.search("模板 结构", limit=10,
                                  include_instruction_artifacts=True, start=project)
     check("显式审计这些技能包时能取回",
@@ -525,6 +703,101 @@ def test_memory(project: Path) -> None:
           str(migrated_item))
     check("低版本记忆不透传额外字段", "unexpected_field" not in migrated_item,
           str(migrated_item))
+
+    # ---- 读取端：写进去的候选必须能被生成路径读到，并且不能被静默跳过 ----
+    attach = project / "本次附件.md"
+    attach.write_text("老师给的素材：交付 31767 辆。\n", encoding="utf-8")
+    fresh = run_record.open_run("生成", start=project, attachments=[str(attach)],
+                                evidence_boundary="attachments")
+    avail = memory_mod.for_generation(start=project)
+    check("生成前读取端能取到可用记忆", avail["items"] and avail["note"],
+          str(avail.get("note")))
+    check("读取端按记忆库自己的分级语义过滤",
+          all(float(i["confidence"]) >= memory_mod.MID_THRESHOLD for i in avail["items"]),
+          str([i["confidence"] for i in avail["items"]]))
+    check("读取端交出 trigger 与 not_applicable 原文供智能体判断适用性",
+          all("trigger" in i and "not_applicable" in i for i in avail["items"]))
+    check("读取端不按 genre 做机器匹配（自由文本匹配会把不适用判成适用）",
+          any((i.get("trigger") or {}).get("category") == "媒体观点供稿"
+              for i in avail["items"]),
+          "trigger 原样返回，不参与过滤")
+    high = [i for i in avail["items"]
+            if float(i["confidence"]) >= memory_mod.HIGH_THRESHOLD]
+    check("高置信项被标为必须在决策卡中可见可取消",
+          {i["id"] for i in high} == set(avail["must_show"]), str(avail["must_show"]))
+
+    base_decision = {
+        "interview": {"rounds": [{"n": 1, "kind": "direction", "question": "按哪条写法？",
+                                  "answer": "按推荐", "changed": "确认主线"}],
+                      "stopped_because": "方向已确认"},
+        "direction": {"options": [{"id": "A", "name": "写法", "claim": "主张",
+                                   "suitable_for": "媒体", "cost": "弱化细节"}],
+                      "selected": "A", "confirmed_by_user": True},
+    }
+    expect_raises("记忆库有可用记忆时，不交代过目结果就不能保存方向", ValueError,
+                  run_record.save_decision, fresh["run_id"], dict(base_decision), start=project)
+    wrong_count = dict(base_decision)
+    wrong_count["memory_reviewed"] = {"considered": 99, "applied": [], "not_applicable": [],
+                                      "cancelled": []}
+    expect_raises("considered 与记忆库实际条数不符时拒绝", ValueError,
+                  run_record.save_decision, fresh["run_id"], wrong_count, start=project)
+    ghost = dict(base_decision)
+    ghost["memory_reviewed"] = {"considered": len(avail["items"]),
+                               "applied": [{"id": "不存在的记忆", "how": "编的"}],
+                               "not_applicable": [], "cancelled": []}
+    expect_raises("交代里出现不存在的记忆 id 时拒绝", ValueError,
+                  run_record.save_decision, fresh["run_id"], ghost, start=project)
+    noreason = dict(base_decision)
+    noreason["memory_reviewed"] = {"considered": len(avail["items"]),
+                                   "applied": [{"id": mid}], "not_applicable": [],
+                                   "cancelled": []}
+    expect_raises("交代里不写怎么用/为什么不适用时拒绝", ValueError,
+                  run_record.save_decision, fresh["run_id"], noreason, start=project)
+    if avail["must_show"]:
+        skipped = dict(base_decision)
+        skipped["memory_reviewed"] = {"considered": len(avail["items"]), "applied": [],
+                                      "not_applicable": [], "cancelled": []}
+        expect_raises("高置信记忆没被交代时拒绝", ValueError,
+                      run_record.save_decision, fresh["run_id"], skipped, start=project)
+
+    before = next(i for i in memory_mod.listing(start=project)["items"] if i["id"] == mid)
+    ok_decision = dict(base_decision)
+    ok_decision["memory_reviewed"] = {
+        "considered": len(avail["items"]),
+        "applied": [{"id": mid, "how": "按它把技术参数转成可感知场景"}],
+        "not_applicable": [{"id": i["id"], "why": "本稿品类不同"}
+                           for i in avail["items"] if i["id"] != mid],
+        "cancelled": [],
+    }
+    saved_mem = run_record.save_decision(fresh["run_id"], ok_decision, start=project)
+    check("如实交代后方向可以保存",
+          saved_mem["memory_reviewed"]["considered"] == len(avail["items"]),
+          str(saved_mem.get("memory_reviewed")))
+    after = next(i for i in memory_mod.listing(start=project)["items"] if i["id"] == mid)
+    check("被采用的记忆记下 last_hit", after["last_hit"] == fresh["run_id"],
+          str(after.get("last_hit")))
+    check("使用不等于证据：置信度不因被采用而变化",
+          abs(after["confidence"] - before["confidence"]) < 1e-9,
+          f"{before['confidence']} → {after['confidence']}")
+
+    # 老师在决策卡里取消，才是证据，才动置信度
+    cancel_run = run_record.open_run("生成", start=project, attachments=[str(attach)],
+                                     evidence_boundary="attachments")
+    avail2 = memory_mod.for_generation(start=project)
+    cancel_decision = dict(base_decision)
+    cancel_decision["memory_reviewed"] = {
+        "considered": len(avail2["items"]),
+        "applied": [],
+        "not_applicable": [{"id": i["id"], "why": "不适用"}
+                           for i in avail2["items"] if i["id"] != mid],
+        "cancelled": [{"id": mid, "why": "老师在决策卡里划掉了"}],
+    }
+    run_record.save_decision(cancel_run["run_id"], cancel_decision, start=project)
+    cancelled_item = next(i for i in memory_mod.listing(start=project)["items"]
+                          if i["id"] == mid)
+    check("决策卡里被取消会按记忆库语义扣分",
+          cancelled_item["confidence"] < after["confidence"],
+          f"{after['confidence']} → {cancelled_item['confidence']}")
 
     return None
 
@@ -1035,15 +1308,35 @@ def test_attachment_delivery_first(tmp: Path) -> None:
             "path": "05-成品参考/历史终稿.md",
             "why": "同品牌同品类已确认终稿",
             "caveat": "只参考表达节奏，不沿用其中事实",
+            "source": "direct_read",
         }],
     }
     outside_style = tmp / "其他品牌" / "终稿.md"
     outside_style.parent.mkdir()
     outside_style.write_text("其他品牌稿件", encoding="utf-8")
     invalid = dict(decision)
-    invalid["style_refs"] = [{"path": str(outside_style), "why": "错误引用"}]
+    invalid["style_refs"] = [{"path": str(outside_style), "why": "错误引用",
+                              "source": "direct_read"}]
     expect_raises("风格参考不能越过单品牌根", ValueError, run_record.save_decision,
                   meta["run_id"], invalid, start=project)
+
+    # ---- 风格参考必须能分辨"检索取回的"与"自己翻目录打开的" ----
+    # 真实运行里出现过第二次生成一次 retrieve 都没调、却照样登记两条 style_refs，
+    # 事后无从分辨哪份材料真正影响了写作。所以 source 是硬要求。
+    no_source = dict(decision)
+    no_source["style_refs"] = [{"path": "05-成品参考/历史终稿.md", "why": "没声明来源"}]
+    expect_raises("style_refs 必须声明 source", ValueError, run_record.save_decision,
+                  meta["run_id"], no_source, start=project)
+    bad_source = dict(decision)
+    bad_source["style_refs"] = [{"path": "05-成品参考/历史终稿.md", "why": "来源不在枚举里",
+                                 "source": "自己想的"}]
+    expect_raises("style_refs 的 source 只认枚举值", ValueError, run_record.save_decision,
+                  meta["run_id"], bad_source, start=project)
+    faked = dict(decision)
+    faked["style_refs"] = [{"path": "05-成品参考/历史终稿.md", "why": "谎称经过检索",
+                            "source": "retrieve"}]
+    expect_raises("声明 retrieve 但本次没检索过该文件时拒绝", ValueError,
+                  run_record.save_decision, meta["run_id"], faked, start=project)
     saved = run_record.save_decision(meta["run_id"], decision, start=project)
     check("附件快线保存轻量方向与风格参考", (
         saved["decision"].get("path") == "attachment-delivery-first"
@@ -1058,6 +1351,22 @@ def test_attachment_delivery_first(tmp: Path) -> None:
     check("手改运行记录也不能让风格参考越过品牌根", a2["status"] == "fail", str(a2))
     run_path.write_text(json.dumps(valid_run, ensure_ascii=False), encoding="utf-8")
     check("附件快线不在正文前造事实原子", saved["facts"] == [])
+
+    # 真的检索过之后，声明 retrieve 就能通过——校验的是事实，不是措辞
+    run_dir_now = run_record.run_dir_for(meta["run_id"], project)
+    (run_dir_now / "retrievals.json").write_text(json.dumps([{
+        "track": "style", "category": "新闻稿",
+        "hits": [{"path": "05-成品参考/历史终稿.md", "score": 3.1}],
+    }], ensure_ascii=False), encoding="utf-8")
+    backed = dict(decision)
+    backed["style_refs"] = [{"path": "05-成品参考/历史终稿.md", "why": "经检索取回",
+                             "caveat": "只取表达", "source": "retrieve"}]
+    ok_saved = run_record.save_decision(meta["run_id"], backed, start=project)
+    check("检索记录里有命中时，source=retrieve 通过并落盘",
+          ok_saved["decision"]["style_refs"][0]["source"] == "retrieve",
+          str(ok_saved["decision"]["style_refs"]))
+    (run_dir_now / "retrievals.json").unlink()
+    saved = run_record.save_decision(meta["run_id"], decision, start=project)
 
     run_dir = run_record.run_dir_for(meta["run_id"], project)
     delivery_path = run_dir / "delivery.md"
@@ -1180,6 +1489,11 @@ def test_attachment_delivery_first(tmp: Path) -> None:
         and "历史终稿.md" in delivery_check.read_text(encoding="utf-8")
         and "经营韧性" in closed.stdout
     ), f"rc={closed.returncode} out={closed.stdout[-200:]} err={closed.stderr[-160:]}")
+    card_text = delivery_check.read_text(encoding="utf-8")
+    # 来源必须写在老师看得见的核对卡上，不能只躺在 run.json 里
+    check("核对卡标出风格参考的来源", "未经检索，直接打开" in card_text, card_text[-320:])
+    check("核对卡对未经检索的风格参考给出提醒",
+          "未经检索登记" in card_text, card_text[-320:])
     check("正文快线通过六项审计", audit_mod.audit(str(run_dir))["verdict"] == "pass")
 
     delivery_path.write_text(delivery_text + "老师新增一句。\n", encoding="utf-8")

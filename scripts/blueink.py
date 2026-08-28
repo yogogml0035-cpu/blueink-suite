@@ -62,17 +62,92 @@ def _emit(data: Any, as_json: bool, lines: list[str] | None = None) -> None:
 # --- 子命令 -----------------------------------------------------------------
 
 
+def _parse_layout(pairs: list[str] | None) -> dict[str, str] | None:
+    """把 ``--layout 标签=目录`` 解析成 corpus_layout。
+
+    传 ``None`` 表示这次没声明，交给 workspace.bind 保留原有布局——不能返回 {}，
+    那会把老师上次声明的布局清空。同一标签可重复传或用逗号分隔多个目录：
+    已发表成品常散在多个目录下。
+    """
+    if not pairs:
+        return None
+    known = set(workspace.DEFAULT_CORPUS_LAYOUT)
+    layout: dict[str, str] = {}
+    for raw in pairs:
+        if "=" not in raw:
+            raise workspace.WorkspaceError(
+                f"--layout 要写成 标签=目录：{raw}\n可用标签：{'、'.join(sorted(known))}"
+            )
+        label, folder = (part.strip() for part in raw.split("=", 1))
+        if label not in known:
+            raise workspace.WorkspaceError(
+                f"--layout 标签不认识：{label}\n可用标签：{'、'.join(sorted(known))}"
+            )
+        folders = index_kb.layout_folders(folder)
+        if not folders:
+            raise workspace.WorkspaceError(f"--layout 的目录不能为空：{raw}")
+        if any(".." in f.split("/") for f in folders):
+            raise workspace.WorkspaceError(f"--layout 的目录不能含 ..：{raw}")
+        merged = index_kb.layout_folders(layout.get(label)) + folders
+        layout[label] = "，".join(dict.fromkeys(merged))
+    return layout
+
+
+def _style_reach_lines(reach: dict, project) -> list[str]:
+    """把风格参考的可达性说成人话。
+
+    这条报告存在的理由：generate.md 规定用 `--track style --category <品类>` 取风格
+    参考，但这个调用可能在整个知识库上恒为空——style 轨只收终稿或成品参考，而一线
+    知识库常把已发表成品命名成【新闻稿】xxx、不带"终稿"字样。原来这种情况没有任何
+    输出，老师直到出了坏稿才可能发现，属于静默降级。检索期的零命中提示语是对智能体
+    说的，老师看不到；这里换成在设置完成时对老师说一次。
+    """
+    total, ok = reach.get("categories") or 0, reach.get("reachable") or []
+    bad, samples = reach.get("unreachable") or [], reach.get("style_samples") or 0
+    lines = [f"{'✓' if ok else '⚠'} 按品类取风格参考：{total} 个品类里 {len(ok)} 个能取到"
+             f"（可作风格样本 {samples} 篇）。"]
+    if ok:
+        lines.append("  可取到：" + "、".join(f"{c}({n})" for c, n in ok))
+    if bad:
+        shown = "、".join(bad[:6]) + ("…" if len(bad) > 6 else "")
+        lines.append(f"  取不到：{shown}")
+    try:
+        layout = workspace.load(project).get("corpus_layout") or {}
+    except workspace.WorkspaceError:
+        layout = {}
+    if not ok:
+        lines.append(
+            "  generate.md 规定的 retrieve --track style --category <品类> 会恒为空。"
+            "原因通常是本库目录名与默认骨架不同，证据类型只能靠文件名关键词猜。"
+        )
+    if bad and not layout:
+        lines.append(
+            "  请老师指出已发表成品放在哪几个目录，然后重新绑定并重建索引："
+            "bind --force --brand <品牌> --kb <原路径> --layout 成品参考=<目录1>,<目录2>"
+            " 后再 index --full。"
+        )
+    elif bad:
+        lines.append(
+            f"  当前已声明布局：{'；'.join(f'{k}={v}' for k, v in layout.items())}。"
+            "取不到的品类若也有成品目录，补进 --layout 再重建索引。"
+        )
+    lines.append("  老师在需求里点名目录时可用 retrieve --under 直接取材，不受本项影响。")
+    return lines
+
+
 def cmd_bind(args: argparse.Namespace) -> int:
     data, warnings = workspace.bind(
         args.brand,
         args.kb,
         brand_key=args.brand_key,
         official_urls=args.official or [],
+        corpus_layout=_parse_layout(args.layout),
         notes=args.notes or "",
         force=args.force,
         create=args.create,
         start=args.project,
     )
+    layout = data.get("corpus_layout") or {}
     payload = {"workspace": data, "warnings": warnings,
                "file": str(workspace.workspace_file(args.project))}
     _emit(
@@ -82,6 +157,8 @@ def cmd_bind(args: argparse.Namespace) -> int:
             f"已绑定：{data['brand']}（{data['brand_key']}）",
             f"知识库：{data['kb_root']}",
             f"官方来源白名单：{'、'.join(workspace.official_hosts(data)) or '（空，联网取证前必须先补）'}",
+            "语料布局：" + ("；".join(f"{k}={v}" for k, v in layout.items()) if layout
+                        else "（空，只能靠文件名关键词猜证据类型）"),
             f"配置写入：{payload['file']}",
             *[f"⚠ {w}" for w in warnings],
             "下一步：blueink.py index",
@@ -185,7 +262,9 @@ def cmd_index(args: argparse.Namespace) -> int:
         f"复用 {stats['reused']}，移除 {stats['removed']}）",
         f"可读正文：{stats['extractable']}；只有元数据：{stats['metadata_only']}"
         f"（这些文件的正文没被读过，不能当成已检索）",
-        f"低置信度：{stats['low_confidence']}；未归类品类：{stats['uncategorized']}",
+        f"低置信度：{stats['low_confidence']}；未归类品类：{stats['uncategorized']}"
+        f"；命中多个品类未定主项：{stats.get('multi_category', 0)}"
+        f"（这些只作候选，按品类检索时降权，不与同品类范例并列）",
     ]
     if stats["instruction_artifacts"]:
         lines.append(
@@ -195,6 +274,9 @@ def cmd_index(args: argparse.Namespace) -> int:
         )
     if stats["skipped"]:
         lines.append(f"⚠ 跳过 {stats['skipped']} 项：" + "；".join((result.get("skipped") or [])[:3]))
+    # 刚 build 完的索引直接传进去，不再读盘；判定条件全部来自 retrieve，索引侧不复述
+    lines += _style_reach_lines(retrieve_mod.style_reach(start=args.project, index=result),
+                               args.project)
     lines.append("低置信度文件保留多个候选标签，不强行归类——只有影响当前稿件时才在访谈里问。")
     _emit(result if args.json else {"stats": stats, "skipped": result.get("skipped")}, args.json, lines)
     return 0
@@ -208,6 +290,7 @@ def cmd_retrieve(args: argparse.Namespace) -> int:
         limit=args.limit,
         since=args.since,
         loose=args.loose,
+        under=args.under,
         include_instruction_artifacts=args.include_instruction_artifacts,
         start=args.project,
     )
@@ -227,6 +310,22 @@ def cmd_retrieve(args: argparse.Namespace) -> int:
         )
     if result.get("note"):
         lines.append(result["note"])
+    if result.get("category_unresolved") and args.track == "style":
+        # 光给封闭词表还不够：智能体要挑一个，就该看见每个标签实际有多少可用素材，
+        # 否则它可能挑一个语义最像、却在这个知识库里根本没内容的品类。
+        # 这是真实清单，不是字符串猜测。只在 style 轨给——这个数就是风格参考的可达性。
+        try:
+            reach = retrieve_mod.style_reach(start=args.project)
+            result["style_reach"] = reach
+            usable = "；".join(f"{c}({n} 篇)" for c, n in reach["reachable"]) or "（无）"
+            lines.append(f"  当前可取到风格参考的品类：{usable}")
+            if reach["unreachable"]:
+                lines.append(
+                    f"  取不到的品类：{'、'.join(reach['unreachable'])}"
+                    f"（这些品类没有已声明的成品目录，选它们也是空手）"
+                )
+        except (workspace.WorkspaceError, OSError, ValueError) as exc:
+            lines.append(f"  （可选项清单取不到：{exc}）")
     _emit(result, args.json, lines)
     return 0
 
@@ -405,6 +504,24 @@ def cmd_memory(args: argparse.Namespace) -> int:
     action = args.action
 
     if action == "list":
+        if args.for_generation:
+            # 生成前的读取端。分级语义由 memory 自己声明，这里只负责把 trigger 与
+            # not_applicable 原文展示出来——适用性是写作判断，不由脚本代判。
+            result = memory_mod.for_generation(args.brand, start=args.project)
+            lines = [result["note"]]
+            for item in result["items"]:
+                must = " ★必须在决策卡中可见可取消" if item["id"] in result["must_show"] else ""
+                lines.append(
+                    f"  [{item['confidence']:.2f} {item['tier']}] {item['id']}{must}")
+                lines.append(f"      知识：{item['knowledge']}")
+                lines.append(f"      用法：{item['usage']}")
+                lines.append(f"      触发：{item.get('trigger')}")
+                if item.get("not_applicable"):
+                    lines.append(f"      不适用：{'；'.join(item['not_applicable'])}")
+            if not result["items"]:
+                lines.append("  没有可用于本次写作的记忆，方向记录里如实写 considered=0。")
+            _emit(result, args.json, lines)
+            return 0
         result = memory_mod.listing(
             brand=args.brand, scope=args.scope,
             min_confidence=args.min_confidence,
@@ -571,6 +688,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     f"  ⚠ 源库里有 {fresh['skipped']} 项被跳过（符号链接或不可读）："
                     + "；".join(fresh.get("sample_skipped") or [])
                 )
+            # 与 index 用同一份实现：设置时说一次，排障时还能再看一次
+            try:
+                reach = retrieve_mod.style_reach(start=args.project)
+                report["style_reach"] = reach
+                lines += _style_reach_lines(reach, args.project)
+            except workspace.WorkspaceError as exc:
+                lines.append(f"⚠ 风格参考可达性查不了：{exc}")
 
     try:
         mem = memory_mod.listing(brand=str(ws["brand"]), start=args.project)
@@ -647,6 +771,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--kb", required=True, help="该品牌知识库目录")
     p.add_argument("--brand-key", dest="brand_key", help="ASCII 短标识，默认自动推导")
     p.add_argument("--official", action="append", help="官方来源域名或 URL，可重复")
+    p.add_argument("--layout", action="append",
+                   help="声明语料布局：标签=目录，可重复，例如 --layout 成品参考=媒体深度稿件,新闻稿。"
+                        "声明过的目录整目录直接定证据类型，不再靠文件名关键词猜；"
+                        "老师的目录名和默认骨架不一样时必须靠它。不传则保留原有布局")
     p.add_argument("--notes", help="这个工作空间的特殊约定")
     p.add_argument("--create", action="store_true",
                    help="知识库目录还不存在时，按标准语料布局建出来再绑定")
@@ -674,6 +802,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=12)
     p.add_argument("--since", help="只要这个日期之后的证据，如 2026-01-01")
     p.add_argument("--loose", action="store_true", help="品类不命中也保留（降权）")
+    p.add_argument("--under",
+                   help="只在绑定根内的这个子路径下检索，用于老师在需求里点名了目录时；"
+                        "与 --track style 同用时不再要求文件自带终稿或成品参考标记，"
+                        "初稿与对照稿仍排除")
     p.add_argument("--include-instruction-artifacts", dest="include_instruction_artifacts",
                    action="store_true",
                    help="连知识库里的历史技能提示词一起返回（只在审计这些技能包时用）")
@@ -739,6 +871,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run")
     p.add_argument("--min-confidence", dest="min_confidence", type=float)
     p.add_argument("--include-retired", dest="include_retired", action="store_true")
+    p.add_argument("--for-generation", dest="for_generation", action="store_true",
+                   help="生成前读取端：只列可用于本次写作的记忆（按记忆库自己的分级语义），"
+                        "并给出 trigger 与 not_applicable 原文供你判断适用性")
     p.add_argument("--same-event", dest="same_event", action="store_true",
                    help="同一传播事件内的同向证据，只 +0.05")
     p.set_defaults(func=cmd_memory)
