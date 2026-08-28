@@ -23,12 +23,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import memory
+import miniyaml
 import workspace
 
 ENTRY = "/blueink-suite"
 ENTRY_ALIASES = (ENTRY, "/blueink-suite:blueink-suite")
 MODES = ("生成", "绑定", "学习", "定位")
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
+POLICY_PATH = Path(__file__).resolve().parent.parent / "policies" / "common-policy.yaml"
 
 # 本次证据边界。``attachments`` 表示老师说了"以附件为准"，先只用附件成稿；
 # ``kb`` 是默认，允许在绑定库内自主检索。它是一条**声明**而不是一道锁——
@@ -43,7 +46,8 @@ KEEP_RUNS = 20
 RUN_META_FIELDS = (
     "schema_version", "run_id", "started_via", "started_at", "mode", "brand", "brand_key",
     "brand_asked", "kb_root", "bound", "task_attachments", "evidence_boundary",
-    "interview", "direction", "facts", "decision", "metrics",
+    "policy_version", "policy_check", "interview", "direction", "facts", "decision",
+    "memory_reviewed", "metrics",
     "stage", "stage_name", "closed_at", "artifacts",
 )
 
@@ -77,12 +81,15 @@ SCHEMA_4_STAGE_ARTIFACTS = {
     10: ["feedback.json"],
 }
 
+SCHEMA_5_STAGE_ARTIFACTS = STAGE_ARTIFACTS
+
 STRONG_WORDS = ("唯一", "全部", "普遍", "均", "最高")
 VERDICTS = ("可进入人工初审", "有待确认项", "暂不建议提交")
 JUDGEMENTS = ("matched", "drifted", "unsourced", "stale")
 
 RISK_COMPARISONS = STRONG_WORDS + (
     "第一", "领先", "最大", "最低", "最健康", "远高于", "远低于",
+    "首个", "首款", "顶级", "标杆", "碾压", "吊打", "完胜", "超越同级",
 )
 RISK_RELATIONS = ("同比", "环比", "超过", "不足", "增长", "下降", "倍")
 RISK_CAUSAL = ("因此", "证明", "说明", "导致", "意味着", "得益于")
@@ -120,6 +127,57 @@ def _sha256(path: Path, chunk: int = 1 << 20) -> str:
                 break
             h.update(block)
     return h.hexdigest()
+
+
+def common_policy() -> dict[str, Any]:
+    """读取并校验全品牌通用规范。
+
+    Returns:
+        含版本、硬规则和中文表达默认值的映射。
+
+    Raises:
+        ValueError: 文件不可读、YAML 不合法或必需字段缺失。
+    """
+    try:
+        data = miniyaml.load_file(POLICY_PATH)
+    except (OSError, miniyaml.YamlError) as exc:
+        raise ValueError(f"通用规范无法读取：{POLICY_PATH}（{exc}）") from exc
+    if not isinstance(data, dict):
+        raise ValueError("通用规范顶层必须是对象")
+    for field in ("version", "owner", "last_reviewed", "scope"):
+        if not str(data.get(field) or "").strip():
+            raise ValueError(f"通用规范缺 {field}")
+    all_ids: set[str] = set()
+    for group, fields in (
+        ("hard_rules", ("id", "name", "rule", "allow", "on_hit")),
+        ("expression_defaults", ("id", "name", "rule")),
+    ):
+        items = data.get(group)
+        if not isinstance(items, list) or not items:
+            raise ValueError(f"通用规范的 {group} 必须是非空数组")
+        ids: set[str] = set()
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(f"通用规范 {group}[{index}] 必须是对象")
+            for field in fields:
+                if not str(item.get(field) or "").strip():
+                    raise ValueError(f"通用规范 {group}[{index}] 缺 {field}")
+            rid = str(item["id"])
+            if rid in ids or rid in all_ids:
+                raise ValueError(f"通用规范 {group} 出现重复 id：{rid}")
+            ids.add(rid)
+            all_ids.add(rid)
+    return data
+
+
+def common_policy_version() -> str:
+    """返回当前通用规范版本；规范无效时抛出 ``ValueError``。"""
+    return str(common_policy()["version"])
+
+
+def common_policy_rule_ids() -> tuple[str, ...]:
+    """按规范顺序返回全部不可覆盖的硬规则编号。"""
+    return tuple(str(item["id"]) for item in common_policy()["hard_rules"])
 
 
 def register_attachments(paths: list[str], brand: str = "") -> list[dict[str, Any]]:
@@ -172,6 +230,7 @@ def open_run(
     evidence_boundary: str | None = None,
     brand: str | None = None,
     started_via: str = ENTRY,
+    one_off: bool = False,
 ) -> dict[str, Any]:
     """开一次运行并返回 meta。
 
@@ -182,9 +241,9 @@ def open_run(
     两种情况允许在未绑定工作空间的项目里开启运行：
 
     - ``绑定`` 模式：这一次运行的任务就是完成绑定。
-    - **老师本次显式给了附件**：此时证据边界就是这几份文件，不需要品牌知识库。
-      老师说"参考这两个文件写一篇"是完全正常的请求，为它强制先做一次绑定，等于
-      为一个五分钟的任务索要一次知识工程。
+    - **老师明确确认本次只用附件**：调用方传入 ``one_off=True``，此时证据边界
+      就是这几份文件，不建立长期品牌知识库。显式确认是为了避免附件让首次资料源
+      询问被静默跳过。
 
     除此之外一律拒绝，避免创建没有可用证据边界的运行记录。
     """
@@ -199,21 +258,29 @@ def open_run(
 
     bound = workspace.is_bound(start)
     attach_only = bool(attachments) and not bound
-    if not bound and mode != "绑定" and not attach_only:
-        raise workspace.WorkspaceError(
-            f"当前项目未绑定品牌知识库，且本次没有给任何附件，无法以「{mode}」模式启动。\n"
-            f"两条出路，选一条：\n"
-            f"  1. 绑定这个品牌的知识库："
-            f"blueink.py bind --brand <品牌> --kb <知识库目录>"
-            f"（还没有目录时加 --create 让它建出来）\n"
-            f"  2. 本次只参考指定文件，不用知识库：open --mode {mode} --attach <文件绝对路径>"
-        )
     if mode == "绑定" and attachments:
         # 绑定模式没有本次任务，附件无处可用；而它的品牌归属只能记成"未绑定"，
         # 那是一条毫无意义又看起来正常的记录。宁可在这里拒绝。
         raise workspace.WorkspaceError(
             "绑定模式不接受 --attach：这一次运行没有本次任务，附件的品牌归属只能记成"
             "「未绑定」。先完成 bind，再以「生成」或「学习」模式开启带附件的运行。"
+        )
+    if one_off and not attach_only:
+        raise workspace.WorkspaceError(
+            "--one-off 只用于未绑定项目里的单次附件任务；已绑定项目或没有附件时不要使用。"
+        )
+    if not bound and mode != "绑定" and not attach_only:
+        raise workspace.WorkspaceError(
+            f"当前项目尚未绑定品牌历史稿件根目录，无法以「{mode}」模式启动。\n"
+            "请先向老师只问一次：这个品牌所有过往稿件所在的共同根目录绝对路径是什么？\n"
+            "拿到路径后运行：blueink.py bind --brand <品牌> --kb <共同根目录>，再运行 index。"
+        )
+    if attach_only and not one_off:
+        raise workspace.WorkspaceError(
+            "当前项目尚未绑定品牌历史稿件根目录，不能因为本次带了附件就静默跳过首次询问。\n"
+            "请先向老师只问一次：这个品牌所有过往稿件所在的共同根目录绝对路径是什么？\n"
+            "拿到路径后运行 bind 与 index；如果老师明确回复「本次只用附件」，"
+            "再用 open --one-off --attach <文件绝对路径> 开启本次任务。"
         )
 
     brand_name = brand_key = "未绑定"
@@ -238,7 +305,7 @@ def open_run(
                     f"知识库路径或确认集合层启发式误判。"
                 )
         brand_name, brand_key = str(ws["brand"]), str(ws["brand_key"])
-        kb = str(ws["kb_root"])
+        kb = str(workspace.kb_root(start))
     elif attach_only and brand:
         # 没有知识库时，本次品牌只是一个标签：没有任何绑定可以与它冲突。
         # 照记下来，因为交付和审计都要知道这一稿写的是谁。
@@ -273,10 +340,15 @@ def open_run(
         "bound": bound,
         "task_attachments": task_attachments,
         "evidence_boundary": evidence_boundary,
+        "policy_version": common_policy_version(),
+        "policy_check": None,
         "interview": None,
         "direction": None,
         "facts": [],
         "decision": None,
+        # 与上面几项同一约定：字段在开启运行时就声明，避免"这次到底有没有读记忆"
+        # 靠字段存不存在来推断。None 表示还没走到方向确认。
+        "memory_reviewed": None,
         "metrics": {},
         "stage": 0,
         "stage_name": STAGE_NAMES[0],
@@ -423,7 +495,171 @@ def draft_risk_sentences(draft: str) -> list[dict[str, Any]]:
     return risks
 
 
-def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
+STYLE_REF_SOURCES = {
+    "retrieve": "经 retrieve 检索命中",
+    "attachment": "老师作为附件提供",
+    "direct_read": "未经检索，直接打开",
+}
+
+
+def _retrieved_paths(meta: dict[str, Any], start=None) -> set[str]:
+    """本次运行 ``retrievals.json`` 里真正命中过的相对路径。
+
+    用来核对 ``style_refs`` 里声明 ``source=retrieve`` 的条目是否真有检索背书。
+    读不到就返回空集合——空集合会让声明 retrieve 的条目校验失败，这是刻意的：
+    宁可要求改成 direct_read 说实话，也不要让一句无从核对的声明蒙混过去。
+    """
+    run_id = str(meta.get("run_id") or "")
+    if not run_id:
+        return set()
+    path = workspace.runs_dir(start) / run_id / "retrievals.json"
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    found: set[str] = set()
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        for hit in record.get("hits") or []:
+            if isinstance(hit, dict) and hit.get("path"):
+                found.add(str(hit["path"]))
+    return found
+
+
+def _validate_style_refs(value: Any, meta: dict[str, Any], start=None) -> list[dict[str, str]]:
+    """校验本次真正打开的历史稿件；它们只提供风格，不进入事实来源。
+
+    每条必须声明 ``source``。原来这里只校验路径存在且在绑定根内，于是"经检索取回的"
+    和"智能体自己翻目录写上去的"在运行记录里长得一样——真实运行中出现过第二次生成
+    一次 ``retrieve`` 都没调、却照样登记了两条 style_refs 的情况，事后无从分辨哪份
+    材料真正影响了写作。声明 ``retrieve`` 的条目会与本次 ``retrievals.json`` 的命中
+    交叉核对；直接打开允许，但必须标成 ``direct_read`` 并会出现在交付核对卡里。
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 3:
+        raise ValueError("style_refs 必须是数组且最多 3 条")
+    kb_root = str(meta.get("kb_root") or "")
+    if value and not kb_root:
+        raise ValueError("未绑定品牌知识库时不能登记历史风格参考")
+    root = Path(kb_root).expanduser().resolve() if kb_root else None
+    retrieved = _retrieved_paths(meta, start) if value else set()
+    refs: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"style_refs[{index}] 必须是对象")
+        raw = str(item.get("path") or "").strip()
+        why = str(item.get("why") or "").strip()
+        if not raw or not why:
+            raise ValueError(f"style_refs[{index}] 必须包含 path 和 why")
+        source = str(item.get("source") or "").strip()
+        if source not in STYLE_REF_SOURCES:
+            raise ValueError(
+                f"style_refs[{index}] 必须声明 source，可选："
+                + "、".join(f"{k}（{v}）" for k, v in STYLE_REF_SOURCES.items())
+                + "。经检索取回的和自己翻目录打开的必须能分辨"
+            )
+        try:
+            path = Path(raw).expanduser()
+            resolved = ((root / path) if root is not None and not path.is_absolute() else path).resolve()
+        except (OSError, RuntimeError) as exc:
+            raise ValueError(f"style_refs[{index}].path 无法解析：{raw}（{exc}）") from exc
+        if root is None or not resolved.is_file() or not workspace.within(resolved, root):
+            raise ValueError(f"style_refs[{index}].path 不存在或越过绑定知识库：{raw}")
+        rel = resolved.relative_to(root).as_posix()
+        if source == "retrieve" and rel not in retrieved:
+            raise ValueError(
+                f"style_refs[{index}] 声明 source=retrieve，但本次 retrievals.json 里"
+                f"没有命中过「{rel}」。先用 retrieve（老师点名目录时加 --under）真正取一次，"
+                f"或把它改成 direct_read 如实登记"
+            )
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        caveat = str(item.get("caveat") or "").strip() or "只参考表达，不作为事实来源"
+        refs.append({
+            "path": rel,
+            "why": why,
+            "caveat": caveat,
+            "source": source,
+        })
+    return refs
+
+
+def _validate_memory_reviewed(value: Any, meta: dict[str, Any], start=None) -> dict[str, Any]:
+    """校验本次生成确实过目了条件化记忆。
+
+    写入端一直在攒候选、读取端不存在，反馈永远影响不到下一次成稿。光在 generate.md
+    写一句"要读"是不够的——``style_refs`` 的教训就是没有校验的指令会被静默跳过。
+    这里要求方向记录里如实交代：过目了几条、采用了哪些、哪些当次不适用、哪些被老师
+    取消。高置信项按 ``memory`` 自己声明的用法契约必须逐条交代（"可自动进入本次写作
+    程序，但必须在决策卡中可见、可取消"）；中置信项只作推荐，不强制逐条写理由，
+    但总数必须与记忆库一致——数字对不上就说明这次根本没读。
+    """
+    brand = str(meta.get("brand") or "")
+    try:
+        available = memory.for_generation(brand, start=start)
+    except memory.MemoryError_ as exc:
+        # 记忆库损坏不该把成稿卡死；doctor 会报出来。
+        return {"considered": 0, "applied": [], "not_applicable": [], "cancelled": [],
+                "store_error": str(exc)}
+    usable = available["items"]
+    must_show = set(available["must_show"])
+    if not usable:
+        return {"considered": 0, "applied": [], "not_applicable": [], "cancelled": []}
+    if value is None:
+        raise ValueError(
+            f"记忆库里有 {len(usable)} 条可用于本次写作的条件化记忆，decision 必须包含 "
+            f"memory_reviewed，如实交代过目结果。先跑 memory list --for-generation 取回它们；"
+            f"一条都不适用也要写出来，不能当作不存在"
+        )
+    if not isinstance(value, dict):
+        raise ValueError("decision.memory_reviewed 必须是对象")
+    known = {item["id"] for item in usable}
+    out: dict[str, Any] = {"considered": len(usable)}
+    seen: set[str] = set()
+    for field in ("applied", "not_applicable", "cancelled"):
+        entries = value.get(field) or []
+        if not isinstance(entries, list):
+            raise ValueError(f"memory_reviewed.{field} 必须是数组")
+        cleaned: list[dict[str, str]] = []
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ValueError(f"memory_reviewed.{field}[{index}] 必须是对象")
+            memory_id = str(entry.get("id") or "").strip()
+            if memory_id not in known:
+                raise ValueError(
+                    f"memory_reviewed.{field}[{index}] 的 id「{memory_id}」不在本次可用记忆里"
+                )
+            if memory_id in seen:
+                raise ValueError(f"记忆 {memory_id} 在 memory_reviewed 里出现了多次")
+            seen.add(memory_id)
+            reason = str(entry.get("how") or entry.get("why") or "").strip()
+            if not reason:
+                raise ValueError(
+                    f"memory_reviewed.{field}[{index}] 要写 how（怎么用的）或 why（为什么不适用）"
+                )
+            cleaned.append({"id": memory_id, "reason": reason})
+        out[field] = cleaned
+    declared = int(value.get("considered") or 0)
+    if declared != len(usable):
+        raise ValueError(
+            f"memory_reviewed.considered 写的是 {declared}，记忆库当前有 {len(usable)} 条可用记忆。"
+            f"数字对不上说明读到的不是当前记忆库，重新取一次"
+        )
+    unaccounted = must_show - seen
+    if unaccounted:
+        raise ValueError(
+            f"高置信记忆必须在决策卡里可见且可取消，这几条没有交代："
+            f"{'、'.join(sorted(unaccounted))}"
+        )
+    return out
+
+
+def _validate_decision(payload: Any, meta: dict[str, Any], start=None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("decision 输入顶层必须是对象")
 
@@ -431,6 +667,9 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     direction = payload.get("direction")
     facts = payload.get("facts")
     decision = payload.get("decision")
+    style_refs = _validate_style_refs(payload.get("style_refs"), meta, start)
+    memory_reviewed = _validate_memory_reviewed(
+        payload.get("memory_reviewed"), meta, start)
     if not isinstance(interview, dict) or not isinstance(interview.get("rounds"), list):
         raise ValueError("decision.interview.rounds 必须是数组")
     rounds = interview["rounds"]
@@ -482,6 +721,8 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
     if attachment_fast_path:
         facts = []
         decision = {"path": "attachment-delivery-first"}
+        if style_refs:
+            decision["style_refs"] = style_refs
     elif not isinstance(facts, list) or len(facts) > 12:
         raise ValueError("facts 必须是数组且最多 12 条")
     if meta.get("mode") == "生成" and not facts and not attachment_fast_path:
@@ -519,11 +760,15 @@ def _validate_decision(payload: Any, meta: dict[str, Any]) -> dict[str, Any]:
                       "material_plan", "information_budget", "expression_bounds", "assumptions"):
             if field not in decision:
                 raise ValueError(f"decision.decision 缺字段 {field}")
+        if style_refs:
+            decision = dict(decision)
+            decision["style_refs"] = style_refs
     return {
         "interview": interview,
         "direction": direction,
         "facts": facts,
         "decision": decision,
+        "memory_reviewed": memory_reviewed,
     }
 
 
@@ -534,7 +779,7 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
         raise ValueError("旧版 meta.json 运行只读兼容，不能写入新版 decision")
     if meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
         raise ValueError("旧版运行只读兼容，不能改写方向或正文")
-    data = _validate_decision(payload, meta)
+    data = _validate_decision(payload, meta, start)
     meta.update(data)
     meta["stage"] = 4
     meta["stage_name"] = "方向已确认"
@@ -544,7 +789,114 @@ def save_decision(run_id: str, payload: Any, start=None) -> dict[str, Any]:
     metrics["decision_saved_at"] = metrics["direction_saved_at"]
     meta["metrics"] = metrics
     _write_meta(run_dir, meta)
+    # 标记这些记忆在本次运行里被过目：只刷新 last_hit / updated，不动置信度。
+    # 在读取端接通之前任何记忆都不可能被命中，decay 的"长期未命中才衰减"因此形同
+    # 必然扣分；标记之后这条规则才回到它本来的意思。写盘失败不该回滚已保存的方向。
+    reviewed = meta.get("memory_reviewed") or {}
+    touched = [entry["id"]
+               for field in ("applied", "not_applicable", "cancelled")
+               for entry in (reviewed.get(field) or [])
+               if isinstance(entry, dict) and entry.get("id")]
+    if touched:
+        try:
+            memory.mark_hit(touched, run_id=run_id, start=start)
+        except memory.MemoryError_:
+            pass
+    # 老师在决策卡里取消掉的项按记忆库自己的语义扣分，这是证据不是用量。
+    for entry in reviewed.get("cancelled") or []:
+        try:
+            memory.cancelled(str(entry["id"]), run_id=run_id, start=start)
+        except (memory.MemoryError_, KeyError, TypeError):
+            pass
     return meta
+
+
+def _validate_policy_hits(value: Any, delivery: str, field: str) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} 必须是数组")
+    valid_ids = set(common_policy_rule_ids())
+    hits: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"{field}[{index}] 必须是对象")
+        rule_id = str(item.get("rule_id") or "").strip()
+        quote = str(item.get("quote") or "").strip()
+        action = str(item.get("action") or "").strip()
+        if rule_id not in valid_ids:
+            raise ValueError(f"{field}[{index}].rule_id 不在通用规范中：{rule_id}")
+        if not quote or quote not in delivery:
+            raise ValueError(f"{field}[{index}].quote 无法定位到 delivery.md")
+        if not action:
+            raise ValueError(f"{field}[{index}] 缺 action")
+        hit = {"rule_id": rule_id, "quote": quote, "action": action}
+        reason = str(item.get("reason") or "").strip()
+        if reason:
+            hit["reason"] = reason
+        hits.append(hit)
+    return hits
+
+
+def save_policy_check(run_id: str, payload: Any, start=None) -> dict[str, Any]:
+    """把通用硬规则检查绑定到交付前的正文版本。
+
+    Args:
+        run_id: 已开启且已经保存方向的运行编号。
+        payload: 结构化 ``hits``；可选 ``checked_rules`` 用于显式交叉校验。
+        start: 业务项目根目录；省略时由工作空间自动定位。
+
+    Returns:
+        含规范版本、正文哈希、命中项和状态的检查回执。
+
+    Raises:
+        ValueError: 规则未逐条检查、命中项不合法、规范版本漂移或正文已交付。
+        FileNotFoundError: 尚未写入 ``delivery.md``。
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("policy 输入顶层必须是对象")
+    run_dir = run_dir_for(run_id, start)
+    meta = load_meta(run_id, start)
+    if _meta_path(run_dir).name != "run.json" or meta.get("schema_version") != CURRENT_SCHEMA_VERSION:
+        raise ValueError("旧版运行只读兼容，不能写入通用规范检查")
+    if (meta.get("metrics") or {}).get("delivery_handoff_at"):
+        raise ValueError("delivery.md 已交给老师；此后只允许保存受限核验问题")
+    delivery_path = run_dir / "delivery.md"
+    if not delivery_path.is_file():
+        raise FileNotFoundError(f"缺 {delivery_path}，不能先检查后成稿")
+    delivery = delivery_path.read_text(encoding="utf-8").strip()
+    if not delivery:
+        raise ValueError("delivery.md 为空，不能执行通用规范检查")
+
+    current_version = common_policy_version()
+    if str(meta.get("policy_version") or "") != current_version:
+        raise ValueError(
+            f"运行绑定的通用规范版本是 {meta.get('policy_version')}，当前为 {current_version}；"
+            "请按当前规范重开运行"
+        )
+    expected = common_policy_rule_ids()
+    checked = payload.get("checked_rules")
+    checked_ids = [str(item) for item in checked] if isinstance(checked, list) else []
+    if checked is not None and (
+        not isinstance(checked, list)
+        or len(checked_ids) != len(set(checked_ids))
+        or set(checked_ids) != set(expected)
+    ):
+        raise ValueError(f"checked_rules 必须逐条包含 {expected}")
+    hits = _validate_policy_hits(payload.get("hits"), delivery, "policy.hits")
+    saved = datetime.now()
+    data = {
+        "policy_version": current_version,
+        "delivery_sha256": _sha256(delivery_path),
+        "checked_rules": list(expected),
+        "hits": hits,
+        "status": "blocked" if hits else "pass",
+        "checked_at": saved.isoformat(timespec="seconds"),
+    }
+    meta["policy_check"] = data
+    metrics = dict(meta.get("metrics") or {})
+    metrics["policy_checked_at"] = data["checked_at"]
+    meta["metrics"] = metrics
+    _write_meta(run_dir, meta)
+    return data
 
 
 def handoff_delivery(run_id: str, start=None) -> dict[str, Any]:
@@ -573,6 +925,25 @@ def handoff_delivery(run_id: str, start=None) -> dict[str, Any]:
             "可修改稿件交给老师后正文发生了变化；当前智能体不得自动覆盖，"
             "请只提供核验问题和局部替换建议"
         )
+    policy_check = meta.get("policy_check")
+    if not isinstance(policy_check, dict):
+        raise ValueError("交付前必须先保存通用规范检查：save --kind policy")
+    if str(policy_check.get("policy_version") or "") != str(meta.get("policy_version") or ""):
+        raise ValueError("通用规范检查版本与本次运行不一致，请重新检查")
+    current_policy_version = common_policy_version()
+    if str(meta.get("policy_version") or "") != current_policy_version:
+        raise ValueError(
+            f"通用规范已从 {meta.get('policy_version')} 更新为 {current_policy_version}；"
+            "请按当前规范重开运行"
+        )
+    if str(policy_check.get("delivery_sha256") or "") != current_hash:
+        raise ValueError("delivery.md 在通用规范检查后发生变化，请重新执行 save --kind policy")
+    checked_rules = [str(item) for item in (policy_check.get("checked_rules") or [])]
+    if len(checked_rules) != len(set(checked_rules)) \
+            or set(checked_rules) != set(common_policy_rule_ids()):
+        raise ValueError("通用硬规则没有逐条检查完整，请重新执行 save --kind policy")
+    if policy_check.get("status") != "pass" or policy_check.get("hits"):
+        raise ValueError("通用规范仍有命中项，修复正文并重新检查后才能 handoff")
 
     now = datetime.now()
     if not metrics.get("delivery_handoff_at"):
@@ -726,7 +1097,9 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
             raise ValueError(f"sources_used[{index}] 未登记或越界：{source}")
 
     cross_brand = payload.get("cross_brand") or []
-    redline_hits = payload.get("redline_hits") or []
+    redline_hits = _validate_policy_hits(
+        payload.get("redline_hits") or [], delivery, "redline_hits"
+    )
     editorial_risks = payload.get("editorial_risks") or []
     if not all(isinstance(value, list) for value in (cross_brand, redline_hits, editorial_risks)):
         raise ValueError("cross_brand、redline_hits、editorial_risks 必须是数组")
@@ -748,6 +1121,7 @@ def _validate_verify(payload: Any, meta: dict[str, Any], run_dir: Path) -> dict[
         "review_mode": "issues-only-after-handoff" if compact_review else "claim-map",
         "risk_sentences": risks if compact_review else [],
         "delivery_sha256": current_hash,
+        "policy_version": meta.get("policy_version"),
         "cross_brand": cross_brand,
         "redline_hits": redline_hits,
         "editorial_risks": editorial_risks,
@@ -780,9 +1154,11 @@ def save_verify(run_id: str, payload: Any, start=None) -> dict[str, Any]:
 def save_payload(run_id: str, kind: str, payload: Any, start=None) -> dict[str, Any]:
     if kind == "decision":
         return save_decision(run_id, payload, start)
+    if kind == "policy":
+        return save_policy_check(run_id, payload, start)
     if kind == "verify":
         return save_verify(run_id, payload, start)
-    raise ValueError("kind 只能是 decision 或 verify")
+    raise ValueError("kind 只能是 decision、policy 或 verify")
 
 
 def build_delivery_check(run_id: str, start=None) -> Path:
@@ -817,7 +1193,14 @@ def build_delivery_check(run_id: str, start=None) -> Path:
         )
     for label, key in (("跨品牌", "cross_brand"), ("红线", "redline_hits")):
         for item in verify.get(key) or []:
-            issues.append(f"- {label}｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}")
+            if label == "红线" and isinstance(item, dict):
+                issues.append(
+                    f"- 红线｜{item.get('rule_id')}｜{item.get('quote')}｜{item.get('action')}"
+                )
+            else:
+                issues.append(
+                    f"- {label}｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}"
+                )
     for item in verify.get("editorial_risks") or []:
         issues.append(
             f"- 编辑风险｜{item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)}"
@@ -833,6 +1216,28 @@ def build_delivery_check(run_id: str, start=None) -> Path:
         date = str(item.get("date") or "").strip()
         source_lines.append(f"- {kind}：{label}" + (f"（{date}）" if date else ""))
 
+    style_lines: list[str] = []
+    unverified = 0
+    decision = meta.get("decision")
+    if isinstance(decision, dict):
+        for item in decision.get("style_refs") or []:
+            if not isinstance(item, dict):
+                continue
+            label = Path(str(item.get("path") or "")).name
+            why = str(item.get("why") or "历史稿件")
+            caveat = str(item.get("caveat") or "只参考表达，不作为事实来源")
+            source = str(item.get("source") or "")
+            if source and source != "retrieve":
+                unverified += 1
+            tag = STYLE_REF_SOURCES.get(source, "来源未登记")
+            style_lines.append(f"- {label}（{tag}）：{why}；{caveat}")
+    if style_lines and unverified:
+        # 让老师看见"这几篇是智能体自己翻出来的，没有检索背书"，而不是只在
+        # run.json 里留一个字段。看得见才可能被质疑。
+        style_lines.append(
+            f"- ⚠ 其中 {unverified} 篇未经检索登记：无法核对它是否真的是同品牌同品类的可用参考。"
+        )
+
     card = f"{verify['verdict']}。"
     if issues:
         card += "\n" + "\n".join(issues[:5])
@@ -843,6 +1248,7 @@ def build_delivery_check(run_id: str, start=None) -> Path:
         + card
         + "\n\n## 实际来源\n\n"
         + "\n".join(source_lines)
+        + (("\n\n## 风格参考\n\n" + "\n".join(style_lines)) if style_lines else "")
         + "\n"
     )
     target = run_dir / "delivery-check.md"
@@ -935,7 +1341,11 @@ def reached_stage(run_dir: Path) -> int:
             schema_version = record.get("schema_version") if isinstance(record, dict) else None
         except (json.JSONDecodeError, OSError, TypeError, ValueError):
             reached = 0
-    artifacts = STAGE_ARTIFACTS if schema_version == CURRENT_SCHEMA_VERSION else SCHEMA_4_STAGE_ARTIFACTS
+    artifacts = (
+        STAGE_ARTIFACTS
+        if schema_version == CURRENT_SCHEMA_VERSION
+        else SCHEMA_5_STAGE_ARTIFACTS if schema_version == 5 else SCHEMA_4_STAGE_ARTIFACTS
+    )
     for stage in sorted(artifacts):
         if any(name in present for name in artifacts[stage]):
             reached = max(reached, stage)

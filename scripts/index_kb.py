@@ -29,7 +29,7 @@ from xml.etree import ElementTree
 
 import workspace
 
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 SUMMARY_CHARS = 200
 MAX_HASH_BYTES = 16 * 1024 * 1024  # 超出部分不参与哈希，避免为大附件反复全量读盘
 SKIP_DIRS = {".git", ".svn", "__pycache__", "node_modules", ".blueink", ".obsidian"}
@@ -176,7 +176,7 @@ def read_body(path: Path) -> tuple[str, str]:
     return "", "unsupported"
 
 
-def skill_roots(root: Path) -> list[Path]:
+def instruction_artifact_roots(root: Path) -> list[Path]:
     """知识库里所有历史技能包的根目录（相对 ``root``）。
 
     判定标志是目录里有 ``SKILL.md`` / ``AGENTS.md`` / ``CLAUDE.md``。按目录判定
@@ -210,10 +210,51 @@ def _is_instruction_artifact(rel: str, roots: list[Path]) -> bool:
     return False
 
 
-def _classify_evidence(haystack: str, layout: dict[str, str], rel: str) -> tuple[list[str], float]:
+def known_categories() -> tuple[str, ...]:
+    """索引使用的品类规范标签，封闭集合。
+
+    这是品类词表的唯一出口：检索侧要判断"传进来的名字是不是规范标签"、要在认不出
+    时把可选项交出去，都从这里取，不各自维护一份。``CATEGORY_RULES`` 的键就是标签
+    本身，值只是索引时用来按文件名归类的关键词，**不作为查询侧的别名词典**——
+    「供稿」「财报稿」这类叫法永远列不全，靠扩充关键词去认它们只会把"找不到"变成
+    "找错"（例如「文案」会被认成「社会化文案」）。查询侧的语义映射交给智能体。
+    """
+    return tuple(CATEGORY_RULES)
+
+
+def _layout_match(rel: str, folder: str) -> bool:
+    """``corpus_layout`` 的目录声明按路径段匹配，不做裸子串匹配。
+
+    原来是 ``folder in rel`` 的裸子串比较。加了 ``bind --layout`` 之后这条会被真的
+    用起来，而裸子串会误伤：声明「成品参考=新闻稿」时，``wiki/写作参考/新闻稿写作
+    规范.md``（写作规范，不是范例）和 ``理想汽车财报资料/2026年/【新闻稿】xxx.md``
+    （属于另一个目录的资产）都会被标成成品参考。按段匹配只认真正的目录层级，
+    顶层与嵌套目录都支持。
+    """
+    low, target = rel.lower(), folder.lower()
+    return low == target or low.startswith(f"{target}/") or f"/{target}/" in low
+
+
+def layout_folders(value: Any) -> list[str]:
+    """把一条 ``corpus_layout`` 的值摊成目录列表。
+
+    一线知识库常把同一类资产放在多个目录下（已发表成品既在「媒体深度稿件」也在
+    「新闻稿」），所以一个标签要允许对多个目录。历史值是单个字符串，继续支持；
+    新写法用逗号或顿号分隔，也接受 YAML 列表。
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        items = [str(v) for v in value]
+    else:
+        items = re.split(r"[,，、;；]", str(value))
+    return [i.strip().replace("\\", "/").strip("/") for i in items if i and i.strip()]
+
+
+def _classify_evidence(haystack: str, layout: dict[str, Any], rel: str) -> tuple[list[str], float]:
     """判断证据类型。``corpus_layout`` 命中时置信度更高。"""
-    for label, folder in (layout or {}).items():
-        if folder and str(folder).lower() in rel.lower():
+    for label, value in (layout or {}).items():
+        if any(_layout_match(rel, folder) for folder in layout_folders(value)):
             return [str(label)], 0.85
     hits = [label for label, keys in EVIDENCE_RULES if any(k in haystack for k in keys)]
     if not hits:
@@ -243,7 +284,15 @@ def _classify_stage(name: str, rel: str) -> str:
 
 
 def _classify_categories(name: str, rel: str, body: str) -> tuple[list[str], list[str], float]:
-    """返回 (主品类, 候选品类, 置信度)。命中位置越靠近文件名越可信。"""
+    """返回 (主品类, 候选品类, 置信度)。命中位置越靠近文件名越可信。
+
+    命中多个品类时**不设主品类**：只把它们放进候选。本模块的前提是"不要求老师先做
+    一次知识工程"，所以对拿不准的文件应当保留多个候选、不强行归类——原来的写法把
+    多命中的文件在每一个品类里都当成主项，于是像 ``wiki/公司战略/AI转型叙事.md``
+    这种知识文档会在新闻稿、媒体观点供稿、媒体传播指引三个品类的检索里都拿到主项
+    满分，和真正的同品类范例并列。检索侧本来就为这种情况准备了降权通道
+    （``category in candidates`` 给较低加权），只是从来没有数据能走到它。
+    """
     def hits_in(text: str) -> list[str]:
         low = text.lower()
         return [cat for cat, keys in CATEGORY_RULES.items() if any(k in low for k in keys)]
@@ -251,14 +300,14 @@ def _classify_categories(name: str, rel: str, body: str) -> tuple[list[str], lis
     from_name = hits_in(name)
     if from_name:
         conf = 0.75 if len(from_name) == 1 else 0.45
-        return from_name[:1] if len(from_name) == 1 else from_name, from_name, conf
+        return (from_name if len(from_name) == 1 else []), from_name, conf
     from_path = hits_in(rel)
     if from_path:
         conf = 0.6 if len(from_path) == 1 else 0.4
-        return from_path[:1] if len(from_path) == 1 else from_path, from_path, conf
+        return (from_path if len(from_path) == 1 else []), from_path, conf
     from_body = hits_in(body[:600])
     if from_body:
-        return from_body[:1] if len(from_body) == 1 else from_body, from_body, 0.3
+        return (from_body if len(from_body) == 1 else []), from_body, 0.3
     return [], [], 0.1
 
 
@@ -412,7 +461,7 @@ def build(full: bool = False, limit: int | None = None, start=None) -> dict[str,
     ws = workspace.load(start)
     root = workspace.kb_root(start)
     layout = ws.get("corpus_layout") or {}
-    roots = skill_roots(root)
+    roots = instruction_artifact_roots(root)
 
     previous = {} if full else {rec["path"]: rec for rec in load_index(start).get("files", [])}
     records: list[dict[str, Any]] = []
@@ -426,9 +475,11 @@ def build(full: bool = False, limit: int | None = None, start=None) -> dict[str,
             break
         rel = path.relative_to(root).as_posix()
         old = previous.get(rel)
+        instruction = _is_instruction_artifact(rel, roots)
         if old is not None:
             try:
-                if old.get("hash") == content_hash(path):
+                if (old.get("hash") == content_hash(path)
+                        and bool(old.get("instruction_artifact")) == instruction):
                     records.append(old)
                     reused += 1
                     continue
@@ -452,7 +503,7 @@ def build(full: bool = False, limit: int | None = None, start=None) -> dict[str,
         "kb_root": str(root),
         "built_at": _now(),
         "preview": bool(limit),
-        "skill_roots": [p.as_posix() for p in roots],
+        "instruction_artifact_roots": [p.as_posix() for p in roots],
         "skipped": skipped,
         "files": records,
         "stats": {
@@ -464,8 +515,17 @@ def build(full: bool = False, limit: int | None = None, start=None) -> dict[str,
             "extractable": sum(1 for r in records if r.get("extractable")),
             "metadata_only": sum(1 for r in records if not r.get("extractable")),
             "low_confidence": sum(1 for r in records if (r.get("confidence") or 0) < 0.5),
+            # 「未归类」保持原义：一个品类都没命中。命中多个但未定主项的单独计数，
+            # 否则这个老师看得见的数字会在不改口径的情况下悄悄变大。
             "uncategorized": sum(
-                1 for r in records if not r.get("categories") and not r.get("instruction_artifact")
+                1 for r in records
+                if not r.get("categories") and not r.get("candidates")
+                and not r.get("instruction_artifact")
+            ),
+            "multi_category": sum(
+                1 for r in records
+                if not r.get("categories") and len(r.get("candidates") or []) > 1
+                and not r.get("instruction_artifact")
             ),
             "instruction_artifacts": sum(1 for r in records if r.get("instruction_artifact")),
             "skipped": len(skipped),

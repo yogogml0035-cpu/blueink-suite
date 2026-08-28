@@ -91,10 +91,18 @@ BOUNDARY_KEYWORDS = ("改稿编排", "版本回退", "Word 排版", "品类认�
 # 这条边界已经破了——而它是会话里被反复确认过的一条。
 FORBIDDEN_SUBCOMMANDS = {"rework", "rollback", "revert", "revise", "restore", "version"}
 
-# 五项验收契约的名称与顺序。审计器与评测规格必须一致，否则某项契约可以被悄悄改名。
-CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效"]
+# 六项验收契约的名称与顺序。审计器与评测规格必须一致，否则某项契约可以被悄悄改名。
+CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效", "通用规范"]
 
 DOC_GLOBS = ("*.md", "references/**/*.md", "evals/*.md", "commands/*.md")
+
+
+def is_source_tree(root: Path) -> bool:
+    """安装包不带源仓库专属材料；缺它们时把相关声明检查标成跳过。"""
+    return (root / ".git").exists() or any(
+        (root / rel).is_file()
+        for rel in ("DESIGN_NOTES.md", "evals/blueink-suite.eval.md")
+    )
 
 # 版本说明与使用反馈证据不是运行契约，项数一致性只核对产品与评测文档。
 COUNT_EXEMPT_DOCS = {"CHANGELOG.md", "EVOLUTION.md"}
@@ -287,15 +295,16 @@ def _floor_interpreter() -> str | None:
 def gate_claims(root: Path) -> Result:
     res = Result("claims")
     docs = {path: path.read_text(encoding="utf-8") for path in doc_files(root)}
+    source_tree = is_source_tree(root)
 
-    _claim_counts(root, docs, res)
+    _claim_counts(root, docs, res, source_tree)
     _claim_subcommands(root, docs, res)
-    _claim_boundaries(root, docs, res)
+    _claim_boundaries(root, docs, res, source_tree)
     _claim_python_floor(root, docs, res)
     _claim_retention(root, docs, res)
     _claim_script_inventory(root, docs, res)
-    _claim_contract_names(root, docs, res)
-    _report_composition(root, res)
+    _claim_contract_names(root, docs, res, source_tree)
+    _report_composition(root, res, source_tree)
     return res
 
 
@@ -356,7 +365,7 @@ def _attributed_counts(line: str) -> list[tuple[str, int]]:
     return out
 
 
-def _claim_counts(root: Path, docs: dict[Path, str], res: Result) -> None:
+def _claim_counts(root: Path, docs: dict[Path, str], res: Result, source_tree: bool) -> None:
     """文档里写的项数必须等于测试真的跑出来的数。
 
     数字本身不重要；重要的是产品声明必须与可执行检查一致。
@@ -377,7 +386,9 @@ def _claim_counts(root: Path, docs: dict[Path, str], res: Result) -> None:
     evals_spec = root / "evals" / "blueink-suite.eval.md"
     spec_text = evals_spec.read_text(encoding="utf-8") if evals_spec.is_file() else ""
     block = re.search(r"```json\n(.*?)\n```", spec_text, re.S)
-    if res.check(bool(block), "评测规格里找不到 ```json 块，数不出夹具项数"):
+    if not block and not source_tree:
+        res.skip("安装运行包不含源仓库评测规格，跳过审计夹具项数核对")
+    elif res.check(bool(block), "评测规格里找不到 ```json 块，数不出夹具项数"):
         try:
             spec = json.loads(block.group(1))
         except json.JSONDecodeError as exc:
@@ -468,16 +479,18 @@ def _claim_subcommands(root: Path, docs: dict[Path, str], res: Result) -> None:
     res.checked += 1
 
 
-def _claim_boundaries(root: Path, docs: dict[Path, str], res: Result) -> None:
+def _claim_boundaries(
+    root: Path, docs: dict[Path, str], res: Result, source_tree: bool
+) -> None:
     """边界清单必须出现在设计说明，SKILL 必须保留能力边界入口。"""
     design = docs.get(root / "DESIGN_NOTES.md", "")
     skill = docs.get(root / "SKILL.md", "")
-    res.check(
-        bool(design and skill),
-        "读不到 DESIGN_NOTES.md / SKILL.md",
-    )
-    for word in BOUNDARY_KEYWORDS:
-        res.check(word in design, f"DESIGN_NOTES.md 边界节缺「{word}」")
+    if source_tree:
+        res.check(bool(design and skill), "读不到 DESIGN_NOTES.md / SKILL.md")
+        for word in BOUNDARY_KEYWORDS:
+            res.check(word in design, f"DESIGN_NOTES.md 边界节缺「{word}」")
+    else:
+        res.skip("安装运行包不含 DESIGN_NOTES.md，跳过源仓库边界清单核对")
     res.check(
         "能力边界" in skill and "文案生成" in skill,
         "SKILL.md 缺「能力边界：文案生成」——这是范围边界的唯一显式声明点",
@@ -546,8 +559,10 @@ def _claim_script_inventory(root: Path, _docs: dict[Path, str], res: Result) -> 
     )
 
 
-def _claim_contract_names(root: Path, docs: dict[Path, str], res: Result) -> None:
-    """五项契约的名称与顺序：审计器代码与评测规格必须一致。"""
+def _claim_contract_names(
+    root: Path, docs: dict[Path, str], res: Result, source_tree: bool
+) -> None:
+    """六项契约的名称与顺序：审计器代码与评测规格必须一致。"""
     audit_src = (root / "scripts" / "audit.py").read_text(encoding="utf-8")
     found = re.findall(r'Check\("A(\d)", "([^"]+)"\)', audit_src)
     unique = {number: name for number, name in found}
@@ -556,11 +571,17 @@ def _claim_contract_names(root: Path, docs: dict[Path, str], res: Result) -> Non
         f"审计器契约名与预期不符：{[n for _, n in sorted(unique.items())]} != {CONTRACT_NAMES}",
     )
     spec = docs.get(root / "evals" / "blueink-suite.eval.md", "")
-    for name in CONTRACT_NAMES:
-        res.check(name in spec, f"评测规格里缺契约名「{name}」")
+    if spec:
+        for name in CONTRACT_NAMES:
+            res.check(name in spec, f"评测规格里缺契约名「{name}」")
+    elif source_tree:
+        for name in CONTRACT_NAMES:
+            res.check(False, f"评测规格里缺契约名「{name}」")
+    else:
+        res.skip("安装运行包不含评测规格，跳过审计契约名核对")
 
 
-def _report_composition(root: Path, res: Result) -> None:
+def _report_composition(root: Path, res: Result, source_tree: bool) -> None:
     """报告规模构成。**只报告不断言**——行数会随每次编辑变动，把它写成硬阈值只会
     制造一道谁都学会绕过的门。构成本身才是要点：多少是方法论、多少是自研状态层、
     多少是可与上游重新同步的外来件、多少是审计夹具。"""
@@ -576,10 +597,15 @@ def _report_composition(root: Path, res: Result) -> None:
     fixtures = [p for p in fixtures if p.is_file()]
     prose = [p for p in doc_files(root) if p.parent.name != "golden"]
 
-    for label, group in (
+    groups = [
         ("方法论与文档", prose), ("自研脚本", own),
-        ("上游同步件", upstream), ("审计夹具", fixtures),
-    ):
+        ("上游同步件", upstream),
+    ]
+    if source_tree:
+        groups.append(("审计夹具", fixtures))
+    else:
+        res.note("规模构成 · 审计夹具：源仓库专属，未随安装包分发")
+    for label, group in groups:
         count, lines = total(group)
         res.note(f"规模构成 · {label}：{count} 个文件 / {lines} 行")
 
@@ -591,9 +617,9 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     (
         "index-hash",
         "scripts/index_kb.py",
-        'if old.get("hash") == content_hash(path):',
-        'if old.get("size") == path.stat().st_size and old.get("mtime") == '
-        'datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds"):',
+        'old.get("hash") == content_hash(path)',
+        'old.get("size") == path.stat().st_size and old.get("mtime") == '
+        'datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")',
         ["scripts/test_state.py"],
         "增量索引改用 size+mtime 判断复用：同长度改写并恢复修改时间后静默漏更新，"
         "检索永远拿不到新内容且不报错",
@@ -629,11 +655,11 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
     (
         "audit-incomplete",
         "scripts/audit.py",
-        'verdict = "incomplete"',
-        'verdict = "pass"',
+        'verdict = "violated" if failed else ("incomplete" if missing else "pass")',
+        'verdict = "violated" if failed else "pass"',
         ["scripts/run_evals.py --rollout --include-holdout"],
-        "审计器把「运行没跑完」判成「流程通过」：中断的运行会拿到一张通行证，"
-        "而这正是保留测试 case-5 存在的理由",
+        "审计器把 Schema 5「运行没跑完」判成「流程通过」：中断的运行会拿到一张通行证，"
+        "而这正是 schema5-incomplete holdout 存在的理由",
     ),
     (
         "sufficiency-dimensions",
@@ -685,9 +711,9 @@ MUTATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         "product-voice",
         "references/generate.md",
         "# 默认生成快线",
-        "# 从旧阶段架构迁移到默认生成快线",
+        "# 默认生成快线\n\n- 新增通用规范层",
         ["scripts/validate.py"],
-        "用户可见运行指导混入实现变化说明：产品表达不再是当前时态",
+        "用户可见运行指导混入本次新增内容：产品表达变成改造记录而不是当前状态",
     ),
 ]
 

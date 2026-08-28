@@ -1,0 +1,16 @@
+{
+  "run_id": "20260825-100010-policy-violation",
+  "brand": "品牌甲",
+  "mode": "生成",
+  "verdict": "violated",
+  "checks": [
+    {"id": "A1", "name": "入口唯一", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A2", "name": "单品牌隔离", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A3", "name": "动态访谈", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A4", "name": "阶段边界", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A5", "name": "输出有效", "status": "pass", "detail": "通过", "evidence": []},
+    {"id": "A6", "name": "通用规范", "status": "fail", "detail": "正文带通用硬规则命中项却已经交付", "evidence": ["run.json:policy_check.hits"]}
+  ],
+  "failed": ["A6"],
+  "missing_artifacts": []
+}

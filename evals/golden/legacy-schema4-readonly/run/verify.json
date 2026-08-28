@@ -1,0 +1,26 @@
+{
+  "role": "single-agent-verifier",
+  "run_id": "20260825-100008-schema4",
+  "claims": [],
+  "coverage": {
+    "total_risks": 0,
+    "matched": 0,
+    "drifted": 0,
+    "unsourced": 0,
+    "stale": 0
+  },
+  "review_mode": "claim-map",
+  "risk_sentences": [],
+  "draft_sha256": "32377c3664d41925312b5ea999c24ccdf47fe2936947aeba287672df5233e9fe",
+  "cross_brand": [],
+  "redline_hits": [],
+  "editorial_risks": [],
+  "sources_used": [
+    {
+      "path_or_url": "/fixtures/brand-a/brief.md",
+      "kind": "需求材料",
+      "date": "2026-08-25"
+    }
+  ],
+  "verdict": "可进入人工初审"
+}

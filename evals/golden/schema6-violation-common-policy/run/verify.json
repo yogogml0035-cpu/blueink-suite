@@ -1,0 +1,15 @@
+{
+  "role": "single-agent-verifier",
+  "run_id": "20260825-100010-policy-violation",
+  "claims": [],
+  "coverage": {"total_risks": 1, "reviewed_risks": 1, "issues": 0, "matched": 0, "drifted": 0, "unsourced": 0, "stale": 0},
+  "review_mode": "issues-only-after-handoff",
+  "risk_sentences": [{"id": "R1", "quote": "品牌甲全面碾压品牌乙，重新定义行业标准。", "signals": ["比较范围"]}],
+  "delivery_sha256": "6b9a3080c875734b2860f1463f228ef5f214f55449b56083c78f05529ab0c5b9",
+  "policy_version": "1.0.0",
+  "cross_brand": [],
+  "redline_hits": [],
+  "editorial_risks": [],
+  "sources_used": [{"path_or_url": "/fixtures/brand-a/brief.md", "kind": "需求材料", "date": "2026-08-25"}],
+  "verdict": "可进入人工初审"
+}

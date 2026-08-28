@@ -349,6 +349,65 @@ def decay(start=None, today: date | None = None) -> dict[str, Any]:
     return {"decayed": touched, "total": len(store["items"])}
 
 
+def for_generation(brand: str | None = None, start=None) -> dict[str, Any]:
+    """生成前应当过目的记忆。
+
+    写入端一直在攒候选，却没有任何一处生成路径会读它们——反馈进得去出不来，
+    老师的意见不会影响下一次成稿，而 ``decay`` 还在按"长期未被命中"扣分，
+    于是候选只会越放越淡直到退休。这个函数就是缺掉的那个读取端。
+
+    **只按品牌和分级过滤，不按 ``genre`` / ``when`` 做机器匹配。** 真实数据里
+    ``genre`` 是「媒体供稿／媒体深度稿件」「对外稿件」这类自由文本，``when`` 是
+    整句话；用字符串匹配去判断适用性，会把"不适用"判成"适用"，比读不到更糟。
+    适用性是写作判断：把 ``trigger`` 与 ``not_applicable`` 原文交出去，由读得到
+    本次任务上下文的智能体决定。
+
+    分级语义沿用 ``listing`` 已经声明的那套用法契约，不另立一套：
+    ``must_show`` 是高置信项，按契约必须在决策卡里可见且可取消；其余可用项只作
+    推荐或 A/B 备选；低于 ``MID_THRESHOLD`` 的按契约不参与生成，只报数量。
+    """
+    listed = listing(brand=brand, start=start)
+    usable = [i for i in listed["items"] if float(i.get("confidence") or 0) >= MID_THRESHOLD]
+    leads = len(listed["items"]) - len(usable)
+    return {
+        "brand": listed["brand"],
+        "items": usable,
+        "must_show": [i["id"] for i in usable
+                      if float(i.get("confidence") or 0) >= HIGH_THRESHOLD],
+        "leads_only": leads,
+        "note": (
+            f"可用于本次写作的记忆 {len(usable)} 条"
+            + (f"，其中必须在决策卡中可见且可取消 {len([i for i in usable if float(i.get('confidence') or 0) >= HIGH_THRESHOLD])} 条" if usable else "")
+            + (f"；另有 {leads} 条置信度过低，只作研究线索、不参与生成" if leads else "")
+            + "。适用性由你按 trigger 与 not_applicable 自行判断，脚本不代判。"
+        ),
+    }
+
+
+def mark_hit(ids: list[str], *, run_id: str, start=None) -> list[str]:
+    """记录这些记忆在本次运行里被过目，只更新 ``last_hit`` 与 ``updated``。
+
+    **不动置信度。** 使用不等于证据：一条记忆被采用过并不能证明它对，只有老师的
+    确认、反例或在决策卡里的取消才是证据（``confirm`` / ``counterexample`` /
+    ``cancelled``）。这里只刷新时间戳，让 ``decay`` 的"长期未被命中才衰减"回到
+    它本来的意思——在读取端接通之前，任何记忆都不可能被命中，衰减是必然的。
+    """
+    if not ids:
+        return []
+    store = load(start)
+    index = {item["id"]: item for item in store["items"]}
+    missing = [i for i in ids if i not in index]
+    if missing:
+        raise MemoryError_(f"记忆不存在：{'、'.join(missing)}")
+    today = date.today().isoformat()
+    for memory_id in ids:
+        item = index[memory_id]
+        item["last_hit"] = run_id
+        item["updated"] = today
+    save(store, start)
+    return list(ids)
+
+
 def tier(confidence: float) -> str:
     if confidence >= HIGH_THRESHOLD:
         return "高"

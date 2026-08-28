@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""五项验收契约的机械审计器。
+"""六项验收契约的机械审计器。
 
 这是"出问题不知道问题出在哪个 md"的直接解法：把一次运行的调用轨迹喂进来，它
 告诉你这次运行在哪一条契约上违约，以及证据在哪个文件的哪个字段。
@@ -9,7 +9,7 @@
 
 三种结论：
 
-- ``pass``       五项全部通过。**不代表稿子好**，只代表流程没有违约。
+- ``pass``       六项全部通过。**不代表稿子好**，只代表流程没有违约。
 - ``violated``   至少一项违约。看 ``failed`` 与对应 ``detail``。
 - ``incomplete`` 运行没跑完，有回执缺失。运行中途中断很常见，不是 bug。
 """
@@ -798,9 +798,9 @@ def _fast_check_entry(record: Any, error: str | None) -> Check:
         check.fail(f"started_via 不是受支持的显式入口 {ENTRY_ALIASES}", "run.json:started_via")
     if not str(record.get("run_id") or ""):
         check.fail("run.json 缺 run_id", "run.json:run_id")
-    if record.get("schema_version") not in (4, run_record.CURRENT_SCHEMA_VERSION):
+    if record.get("schema_version") not in (4, 5, run_record.CURRENT_SCHEMA_VERSION):
         check.fail(
-            f"run.json.schema_version 必须为 4 或 {run_record.CURRENT_SCHEMA_VERSION}",
+            f"run.json.schema_version 必须为 4、5 或 {run_record.CURRENT_SCHEMA_VERSION}",
             "run.json:schema_version",
         )
     return check
@@ -818,6 +818,13 @@ def _fast_check_isolation(record: Any, verify: Any) -> Check:
         source = str(fact.get("source_path") or "")
         if not source or not _fast_source_allowed(source, record):
             check.fail(f"事实来源未登记或越过绑定知识库：{source}", f"run.json:facts[{index}]")
+    decision = record.get("decision")
+    if isinstance(decision, dict):
+        for index, item in enumerate(decision.get("style_refs") or []):
+            ref = str((item or {}).get("path") or "") if isinstance(item, dict) else ""
+            if not ref or not _fast_source_allowed(ref, record):
+                check.fail(f"风格参考未登记或越过绑定知识库：{ref}",
+                           f"run.json:decision.style_refs[{index}]")
     if isinstance(verify, dict):
         for index, item in enumerate(verify.get("sources_used") or []):
             ref = str((item or {}).get("path_or_url") or "") if isinstance(item, dict) else ""
@@ -874,7 +881,7 @@ def _fast_check_stages(run_dir: Path, record: Any, verify: Any, verify_error: st
         check.fail(verify_error, "verify.json")
     present = {path.name for path in run_dir.iterdir() if path.is_file()}
     obsolete = set(LEGACY_GENERATION_FILES)
-    if isinstance(record, dict) and record.get("schema_version") == run_record.CURRENT_SCHEMA_VERSION:
+    if isinstance(record, dict) and record.get("schema_version") in (5, run_record.CURRENT_SCHEMA_VERSION):
         obsolete.update({"draft.md", "draft-a.md", "draft-b.md"})
     leaked = sorted(present & obsolete)
     if leaked:
@@ -901,8 +908,8 @@ def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
     if not isinstance(record, dict) or str(record.get("mode") or "生成") != "生成":
         check.skip("当前模式不产出正文")
         return check
-    current = record.get("schema_version") == run_record.CURRENT_SCHEMA_VERSION
-    body_name = "delivery.md" if current else "draft.md"
+    single_body = record.get("schema_version") in (5, run_record.CURRENT_SCHEMA_VERSION)
+    body_name = "delivery.md" if single_body else "draft.md"
     body = _text(run_dir, body_name)
     if body is None:
         check.skip(f"运行还没成稿（缺 {body_name}）")
@@ -940,7 +947,7 @@ def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
             if word in body and not any(word in quote for quote in reviewed):
                 check.fail(f"附件稿件里的强比较词「{word}」没有进入轻量复核清单", "verify.json")
 
-    if current:
+    if single_body:
         for mixed_section in ("交付核对卡", "交付前核对卡", "实际来源"):
             if mixed_section in body:
                 check.fail(f"delivery.md 混入{mixed_section}，正文与核对信息没有分开", "delivery.md")
@@ -967,13 +974,82 @@ def _fast_check_output(run_dir: Path, record: Any, verify: Any) -> Check:
                 check.fail("delivery.md 没有使用 verify.json 的结论", "delivery.md")
             if "实际来源" not in delivery:
                 check.fail("delivery.md 缺实际来源", "delivery.md")
-    artifact_name = "delivery-check.md" if current else "delivery.md"
+    artifact_name = "delivery-check.md" if single_body else "delivery.md"
     artifact = _text(run_dir, artifact_name)
     if artifact is not None:
         for leak in ("run.json", "verify.json", ".blueink/runs"):
             if leak in artifact:
                 check.fail(f"交付泄漏技术轨迹：{leak}", artifact_name)
                 break
+    return check
+
+
+def _fast_check_policy(run_dir: Path, record: Any, verify: Any) -> Check:
+    """A6 只证明规范回执完整且绑定正文，不冒充语义质量证明。"""
+    check = Check("A6", "通用规范")
+    if not isinstance(record, dict):
+        check.fail("run.json 顶层不是对象", "run.json")
+        return check
+    schema = record.get("schema_version")
+    if schema != run_record.CURRENT_SCHEMA_VERSION:
+        check.skip(f"历史 schema {schema} 没有通用规范回执，按原合同只读审计")
+        return check
+    if str(record.get("mode") or "生成") != "生成":
+        check.skip("当前模式不产出正文")
+        return check
+    body = run_dir / "delivery.md"
+    if not body.is_file():
+        check.skip("尚未写入 delivery.md")
+        return check
+
+    version = str(record.get("policy_version") or "")
+    if not version:
+        check.fail("run.json 缺 policy_version", "run.json:policy_version")
+        return check
+    policy_check = record.get("policy_check")
+    if not isinstance(policy_check, dict):
+        if _archived(record) or int(record.get("stage") or 0) >= 5:
+            check.fail("正文已交付但缺通用规范检查回执", "run.json:policy_check")
+        else:
+            check.skip("正文尚未完成通用规范检查")
+        return check
+    if str(policy_check.get("policy_version") or "") != version:
+        check.fail("通用规范检查版本与运行版本不一致", "run.json:policy_check.policy_version")
+
+    checked = [str(item) for item in (policy_check.get("checked_rules") or [])]
+    if not checked or len(checked) != len(set(checked)):
+        check.fail("checked_rules 为空或含重复规则", "run.json:policy_check.checked_rules")
+    try:
+        current_version = run_record.common_policy_version()
+        expected_ids = set(run_record.common_policy_rule_ids())
+    except ValueError as exc:
+        check.fail(str(exc), "policies/common-policy.yaml")
+        current_version = ""
+        expected_ids = set()
+    if version == current_version and set(checked) != expected_ids:
+        check.fail("checked_rules 没有覆盖当前全部通用硬规则", "run.json:policy_check.checked_rules")
+
+    actual_hash = run_record._sha256(body)
+    if str(policy_check.get("delivery_sha256") or "") != actual_hash:
+        if _archived(record) or int(record.get("stage") or 0) >= 5:
+            check.fail("通用规范检查没有绑定当前 delivery.md", "run.json:policy_check.delivery_sha256")
+        else:
+            check.skip("正文在检查后变化，handoff 前需要重新检查")
+
+    hits = policy_check.get("hits")
+    if not isinstance(hits, list):
+        check.fail("policy_check.hits 必须是数组", "run.json:policy_check.hits")
+        hits = []
+    expected_status = "blocked" if hits else "pass"
+    if policy_check.get("status") != expected_status:
+        check.fail(f"policy_check.status 应为 {expected_status}", "run.json:policy_check.status")
+    if hits and (_archived(record) or int(record.get("stage") or 0) >= 5):
+        check.fail("正文带通用硬规则命中项却已经交付", "run.json:policy_check.hits")
+    elif hits:
+        check.skip("通用硬规则仍有命中项，尚未交付")
+
+    if isinstance(verify, dict) and str(verify.get("policy_version") or "") != version:
+        check.fail("verify.json 没有使用本次运行的通用规范版本", "verify.json:policy_version")
     return check
 
 
@@ -986,12 +1062,13 @@ def audit_fast(run_dir: Path) -> dict[str, Any]:
         _fast_check_interview(record),
         _fast_check_stages(run_dir, record, verify, verify_error),
         _fast_check_output(run_dir, record, verify),
+        _fast_check_policy(run_dir, record, verify),
     ]
     mode = str((record or {}).get("mode") or "生成") if isinstance(record, dict) else "生成"
     present = {path.name for path in run_dir.iterdir() if path.is_file()}
     required = (
         CURRENT_REQUIRED_BY_MODE
-        if isinstance(record, dict) and record.get("schema_version") == run_record.CURRENT_SCHEMA_VERSION
+        if isinstance(record, dict) and record.get("schema_version") in (5, run_record.CURRENT_SCHEMA_VERSION)
         else SCHEMA_4_REQUIRED_BY_MODE
     )
     missing = [
@@ -1036,7 +1113,9 @@ def audit(run_dir: str | Path) -> dict[str, Any]:
         check_interview(path, meta),
         check_stages(path, meta),
         check_output(path, meta),
+        Check("A6", "通用规范"),
     ]
+    checks[-1].skip("3.x 历史运行没有通用规范回执，按原合同只读审计")
 
     present = {p.name for p in path.iterdir() if p.is_file()}
     missing = [
@@ -1065,11 +1144,11 @@ def audit(run_dir: str | Path) -> dict[str, Any]:
 
 # --- 结论自检：审计结论本身是否可用 -----------------------------------------
 #
-# 这五项检查的对象是 audit 的输出，而不是运行记录。它们保证一件事：**审计结论
+# 这五项结论自检的对象是 audit 的输出，而不是运行记录。它们保证一件事：**审计结论
 # 永远能把问题定位到具体文件**。评测就是拿这五项跑 evals/golden 下的夹具。
 
-CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效"]
-CONTRACT_IDS = ["A1", "A2", "A3", "A4", "A5"]
+CONTRACT_NAMES = ["入口唯一", "单品牌隔离", "动态访谈", "阶段边界", "输出有效", "通用规范"]
+CONTRACT_IDS = ["A1", "A2", "A3", "A4", "A5", "A6"]
 VALID_STATUS = {"pass", "fail", "skip"}
 VERDICT_CHECKS = ("schema", "consistent", "localisable", "explained", "contracts")
 
@@ -1125,7 +1204,9 @@ def verify_verdict(data: Any, which: str) -> list[str]:
                 problems.append(f"{check.get('id')} 违约但没给 evidence，无法定位到文件")
                 continue
             for ref in evidence:
-                if not isinstance(ref, str) or (".json" not in ref and ".md" not in ref):
+                if not isinstance(ref, str) or not any(
+                    suffix in ref for suffix in (".json", ".md", ".yaml")
+                ):
                     problems.append(f"{check.get('id')} 的 evidence 未指向具体文件：{ref!r}")
         return problems
 
@@ -1141,7 +1222,7 @@ def verify_verdict(data: Any, which: str) -> list[str]:
     if which == "contracts":
         names = [c.get("name") for c in checks]
         if names != CONTRACT_NAMES:
-            problems.append(f"五项契约名称应为 {CONTRACT_NAMES}，实际 {names}")
+            problems.append(f"六项契约名称应为 {CONTRACT_NAMES}，实际 {names}")
         return problems
 
     return [f"未知的自检项：{which}"]
